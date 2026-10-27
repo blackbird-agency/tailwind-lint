@@ -1,0 +1,11 @@
+@layer components {
+    .step {
+        @apply w-full pt-4;
+    }
+
+    @screen md {
+        .step {
+            @apply w-1/2 px-10;
+        }
+    }
+}

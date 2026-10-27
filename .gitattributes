@@ -1,0 +1,4 @@
+/test export-ignore
+/node_modules export-ignore
+/.gitignore export-ignore
+/.gitattributes export-ignore

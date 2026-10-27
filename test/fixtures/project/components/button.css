@@ -1,0 +1,21 @@
+@layer components {
+    .btn {
+        @apply rounded-full px-8 text-base;
+
+        &-primary {
+            @apply btn bg-primary text-white;
+
+            &:hover {
+                @apply bg-transparent;
+            }
+        }
+
+        &-primary-small {
+            @apply btn-primary px-5 text-xs;
+        }
+    }
+
+    .title-font {
+        @apply font-bold uppercase;
+    }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@blackbird/tailwind-lint",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lint the Tailwind CSS classes of templates and stylesheets against each site's own Tailwind config. Distributed as the Composer package blackbird/tailwind-lint, with a prebuilt dependency-free bundle in dist/.",
+  "license": "UNLICENSED",
+  "bin": {
+    "tailwind-lint": "dist/tailwind-lint.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "hooks"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "esbuild bin/lint.js --bundle --platform=node --target=node18 --outfile=dist/tailwind-lint.js",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "micromatch": "^4.0.8",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1"
+  }
+}

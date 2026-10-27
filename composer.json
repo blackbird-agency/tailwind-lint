@@ -1,0 +1,16 @@
+{
+    "name": "blackbird/tailwind-lint",
+    "description": "Lint the Tailwind CSS classes of Magento (Hyvä) and Sylius templates and stylesheets against each site's own Tailwind config. Ships a prebuilt Node bundle, a GrumPHP-ready staged-files script and a Claude Code hook.",
+    "type": "library",
+    "license": "proprietary",
+    "keywords": [
+        "tailwind",
+        "lint",
+        "hyva",
+        "grumphp",
+        "claude-code"
+    ],
+    "bin": [
+        "bin/tailwind-lint"
+    ]
+}

@@ -1,0 +1,6 @@
+@import url(components/button.css);
+@import url(components/step.css);
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
