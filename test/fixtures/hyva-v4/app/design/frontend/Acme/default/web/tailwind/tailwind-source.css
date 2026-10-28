@@ -1,0 +1,8 @@
+@import "tailwindcss" source(none);
+@import "./components/card.css";
+@import "./generated/hyva-source.css";
+@import "./generated/hyva-tokens.css";
+
+@source "./templates/**/*.phtml";
+
+@custom-variant dark (&:where(.dark, .dark *));

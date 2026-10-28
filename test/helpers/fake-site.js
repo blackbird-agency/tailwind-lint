@@ -29,8 +29,14 @@ module.exports = function fakeSite() {
         'translate-x-6': [['--tw-translate-x', '1.5rem'], ['transform', T]],
         'translate-y-4': [['--tw-translate-y', '1rem'], ['transform', T]],
     };
+    const declared = new Set(['btn', 'btn-primary', 'title-font']);
     return {
         name: 'Fake',
+        version: 3,
+        loadClasses: async () => {},
+        generates: (raw) => raw.replace(/^((md|hover):)+/, '') in signatures,
+        declares: (name) => declared.has(name),
+        markers: new Set(['group', 'peer']),
         signature: (name) => signatures[name] ?? null,
         isDefaultShade: (color) => /^(blue|gray|red)-\d+$/.test(color),
         scale: (key) => scales[key] ?? {},

@@ -1,0 +1,9 @@
+{
+    "name": "acme-default-theme",
+    "private": true,
+    "dependencies": {
+        "@hyva-themes/hyva-modules": "1.3.0",
+        "@tailwindcss/node": "4.1.17",
+        "tailwindcss": "4.1.17"
+    }
+}

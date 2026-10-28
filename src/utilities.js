@@ -40,4 +40,10 @@ for (const corner of ['', '-t', '-r', '-b', '-l', '-tl', '-tr', '-br', '-bl', '-
     SCALES[`rounded${corner}`] = { key: 'borderRadius', named: /^(none|sm|md|lg|full|\d*x+l)$/ };
 }
 
-module.exports = { COLOR_PREFIXES, SCALES, SCALE_PREFIXES: byLength(Object.keys(SCALES)) };
+const RUNTIME_PREFIXES = byLength(new Set([
+    ...COLOR_PREFIXES, ...Object.keys(SCALES),
+    'font', 'opacity', 'z', 'order', 'grid-cols', 'grid-rows', 'col-span', 'row-span', 'col-start', 'col-end',
+    'row-start', 'row-end', 'duration', 'delay', 'scale', 'rotate', 'blur', 'tracking', 'rounded',
+]));
+
+module.exports = { COLOR_PREFIXES, SCALES, SCALE_PREFIXES: byLength(Object.keys(SCALES)), RUNTIME_PREFIXES };

@@ -23,7 +23,7 @@ module.exports = {
                 if (previous.value === value) continue;
                 const shown = properties.filter((property) => !property.startsWith('--'));
                 const list = (shown.length ? shown : properties).map((property) => `\`${property}\``).join(', ');
-                violations.push({ token: token.raw, message: `\`${token.raw}\` conflicts with \`${previous.token.raw}\`: both set ${list}` });
+                violations.push({ token, message: `\`${token.raw}\` conflicts with \`${previous.token.raw}\`: both set ${list}` });
             }
         }
         return violations;

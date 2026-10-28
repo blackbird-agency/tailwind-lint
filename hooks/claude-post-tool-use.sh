@@ -2,6 +2,11 @@
 # PostToolUse exit codes: 2 feeds stderr back to Claude, 1 only shows it to the user.
 set -uo pipefail
 
+if ! command -v jq >/dev/null; then
+    echo 'tailwind-lint not run: jq is not installed' >&2
+    exit 1
+fi
+
 file=$(jq -r '.tool_input.file_path // empty')
 case "$file" in
     *.phtml|*.css) ;;

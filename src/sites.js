@@ -17,7 +17,7 @@ function adapterFor(version) {
 function loadSites(config) {
     return config.sites.map((site) => {
         const req = createRequire(site.config);
-        return adapterFor(req('tailwindcss/package.json').version).loadSite(site, req);
+        return adapterFor(req('tailwindcss/package.json').version).loadSite(site, req, config.root);
     });
 }
 

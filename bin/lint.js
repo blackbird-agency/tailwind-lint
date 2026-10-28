@@ -9,15 +9,18 @@ const { format } = require('../src/report');
 function parseArguments(argv) {
     const options = { all: false, config: 'tailwind-lint.config.json', files: [] };
     for (let index = 0; index < argv.length; index++) {
-        if (argv[index] === '--all') options.all = true;
-        else if (argv[index] === '--config') options.config = argv[++index];
-        else options.files.push(argv[index]);
+        const argument = argv[index];
+        if (argument === '--all') options.all = true;
+        else if (argument === '--config' && index + 1 < argv.length) options.config = argv[++index];
+        else if (argument.startsWith('--')) throw new Error(`tailwind-lint: unknown option ${argument}`);
+        else options.files.push(argument);
     }
     return options;
 }
 
 async function main(argv) {
     const options = parseArguments(argv);
+    if (!options.files.length) return 0;
     const config = loadConfig(options.config);
     const sites = loadSites(config);
     const violations = [];
@@ -30,6 +33,7 @@ async function main(argv) {
 main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
 }, (error) => {
-    process.stderr.write(`tailwind-lint: ${error.stack || error.message}\n`);
+    const known = error.message?.startsWith('tailwind-lint');
+    process.stderr.write(`${known ? error.message : `tailwind-lint: ${error.stack || error.message}`}\n`);
     process.exitCode = 1;
 });

@@ -13,6 +13,6 @@ module.exports = {
         return tokens
             .filter((token) => token.arbitrary && COLOR_VALUE.test(token.arbitrary)
                 && (token.property ? COLOR_PROPERTIES.test(token.property) : matchPrefix(token.core, COLOR_PREFIXES)))
-            .map((token) => ({ token: token.raw, message: `hardcoded colour in \`${token.raw}\`: use a theme colour alias` }));
+            .map((token) => ({ token, message: `hardcoded colour in \`${token.raw}\`: use a theme colour alias` }));
     },
 };

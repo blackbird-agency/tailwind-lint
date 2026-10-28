@@ -2,6 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { assertLocked } = require('../lockfile');
+const { readHyvaConfig, isHyvaTheme, hyvaModules, hyvaSourceCss, hyvaTokensCss, assertMagentoRoot } = require('../hyva');
 const postcss = require('postcss');
 const micromatch = require('micromatch');
 
@@ -27,25 +29,67 @@ const STATIC_KEYS = {
     borderRadius: { none: '0', full: 'calc(infinity * 1px)' },
 };
 
-const DYNAMIC_VALUE = /^(\d+(\.(0|25|5|75))?|\d+\/\d+|px)$/;
+// Comments are matched first so that an @import inside a comment is skipped (group 1 unset).
+const IMPORT = /\/\*[\s\S]*?\*\/|@import\s+(?:url\()?\s*["']([^"']+)["'][^;]*;?/g;
+const TOKENS_SLOT = '/* tailwind-lint: hyva-tokens.css */';
 
-function collectImports(file, seen = new Set()) {
-    if (seen.has(file) || !fs.existsSync(file)) return seen;
-    seen.add(file);
-    const css = fs.readFileSync(file, 'utf8');
-    for (const match of css.matchAll(/@import\s+(?:url\()?\s*["']([^"']+)["']/g)) {
-        if (!match[1].startsWith('.')) continue;
-        const target = path.resolve(path.dirname(file), match[1]);
-        const resolved = target.endsWith('.css') ? target : [`${target}.css`, path.join(target, 'index.css')].find(fs.existsSync);
-        if (resolved) collectImports(resolved, seen);
+function parse(file, css) {
+    try {
+        return postcss.parse(css, { from: file });
+    } catch (error) {
+        throw new Error(`tailwind-lint: cannot parse ${file}: ${error.reason ?? error.message}`);
     }
-    return seen;
+}
+
+// Targets inside generated/ are resolved without touching the disk: their files may be stale.
+function resolveImport(from, target, generatedDir) {
+    if (!target.startsWith('.') && !path.isAbsolute(target)) return null;
+    const resolved = path.resolve(path.dirname(from), target);
+    if (resolved.endsWith('.css')) return resolved;
+    if (resolved.startsWith(generatedDir + path.sep)) return `${resolved}.css`;
+    return [`${resolved}.css`, path.join(resolved, 'index.css')].find(fs.existsSync) ?? resolved;
+}
+
+function unrebuildable(file, target) {
+    return new Error(`tailwind-lint: ${file} imports ${target}, a generated file tailwind-lint cannot rebuild`);
+}
+
+function rewriteEntry(entry, generatedDir, hyva) {
+    const isGenerated = (target) => target.startsWith(generatedDir + path.sep);
+    return fs.readFileSync(entry, 'utf8').replace(IMPORT, (whole, target) => {
+        if (target === undefined) return whole;
+        const resolved = resolveImport(entry, target, generatedDir);
+        if (!resolved || !isGenerated(resolved)) return whole;
+        const name = path.relative(generatedDir, resolved);
+        if (hyva && name === 'hyva-source.css') return hyva.sourceCss;
+        if (hyva && name === 'hyva-tokens.css') return TOKENS_SLOT;
+        throw unrebuildable(entry, resolved);
+    });
+}
+
+function collectFiles(entry, css, generatedDir) {
+    const files = [];
+    const seen = new Set();
+    const visit = (file, text) => {
+        if (seen.has(file)) return;
+        seen.add(file);
+        files.push({ file, css: text, root: parse(file, text) });
+        for (const match of text.matchAll(IMPORT)) {
+            if (match[1] === undefined) continue;
+            const target = resolveImport(file, match[1], generatedDir);
+            if (!target) continue;
+            if (target.startsWith(generatedDir + path.sep)) throw unrebuildable(file, target);
+            if (fs.existsSync(target)) visit(target, fs.readFileSync(target, 'utf8'));
+        }
+    };
+    visit(entry, css);
+    return files;
 }
 
 function themeVariables(files) {
     const variables = new Map();
-    for (const file of files) {
-        postcss.parse(fs.readFileSync(file, 'utf8')).walkAtRules('theme', (theme) => {
+    for (const { root } of files) {
+        root.walkAtRules('theme', (theme) => {
             theme.walkDecls(/^--/, (decl) => variables.set(decl.prop, decl.value));
         });
     }
@@ -53,15 +97,24 @@ function themeVariables(files) {
 }
 
 function sourceGlobs(files) {
-    const globs = [];
-    for (const file of files) {
-        for (const match of fs.readFileSync(file, 'utf8').matchAll(/@source\s+(not\s+)?["']([^"']+)["']/g)) {
-            if (match[1]) continue;
+    const globs = { include: [], ignore: [] };
+    for (const { file, css } of files) {
+        for (const match of css.matchAll(/@source\s+(not\s+)?["']([^"']+)["']/g)) {
             const target = path.resolve(path.dirname(file), match[2]);
-            globs.push(/[*{]/.test(match[2]) || path.extname(target) ? target : `${target}/**`);
+            globs[match[1] ? 'ignore' : 'include'].push(/[*{]/.test(match[2]) || path.extname(target) ? target : `${target}/**`);
         }
     }
     return globs;
+}
+
+function markers(files) {
+    const found = new Set(['group', 'peer']);
+    for (const { root } of files) {
+        root.walkAtRules('custom-variant', (rule) => {
+            if (/^dark\b/.test(rule.params) && rule.toString().includes('.dark')) found.add('dark');
+        });
+    }
+    return found;
 }
 
 function onlyLayers(node) {
@@ -84,8 +137,7 @@ function buildComponentIndex(files) {
         if (!applied.has(name)) applied.set(name, new Set());
         params.replace(/!important/g, '').split(/\s+/).filter(Boolean).forEach((token) => applied.get(name).add(token));
     };
-    for (const file of files) {
-        const root = postcss.parse(fs.readFileSync(file, 'utf8'));
+    for (const { root } of files) {
         root.walkAtRules('utility', (rule) => {
             if (!rule.params.endsWith('-*')) names.add(rule.params.trim());
         });
@@ -103,16 +155,56 @@ function buildComponentIndex(files) {
     return { names, applied };
 }
 
-function loadSite({ name, config: configFile, css }, req) {
+function hyvaContext(root, cssDir, name, configFile) {
+    if (!root) throw new Error(`tailwind-lint: site ${name} is a Hyvä theme, the Magento root is required`);
+    assertMagentoRoot(configFile, root);
+    const config = readHyvaConfig(cssDir);
+    const area = config?.tailwind?.area ?? 'frontend';
+    return { config, sourceCss: hyvaSourceCss(root, hyvaModules(root, config), area) };
+}
+
+function loadSite({ name, config: configFile, css }, req, root) {
+    const hyvaTheme = isHyvaTheme(path.dirname(configFile), fs.existsSync(css) ? fs.readFileSync(css, 'utf8') : '');
+    assertLocked(req, ['tailwindcss', '@tailwindcss/node', ...(hyvaTheme ? ['@hyva-themes/hyva-modules'] : [])]);
     const cssDir = path.dirname(css);
-    const files = [...collectImports(css)];
-    const defaults = themeVariables([req.resolve('tailwindcss/theme.css')]);
-    const project = themeVariables(files);
-    const variables = new Map([...defaults, ...project]);
+    const generatedDir = path.join(cssDir, 'generated');
+    const hyva = hyvaTheme ? hyvaContext(root, cssDir, name, configFile) : null;
+    const entryCss = rewriteEntry(css, generatedDir, hyva);
+    const files = collectFiles(css, entryCss, generatedDir);
+    const themeFile = req.resolve('tailwindcss/theme.css');
+    const defaults = themeVariables([{ root: parse(themeFile, fs.readFileSync(themeFile, 'utf8')) }]);
+    let project = themeVariables(files);
+    let variables = new Map([...defaults, ...project]);
     const globs = sourceGlobs(files);
     const components = buildComponentIndex(files);
     const signatures = new Map();
+    const generated = new Map();
+    let declared = null;
     let compiler = null;
+    let designSystem = null;
+    let ready = null;
+
+    const scales = new Map();
+    const prepare = () => {
+        ready ??= (async () => {
+            const tokens = entryCss.includes(TOKENS_SLOT) ? (await hyvaTokensCss(cssDir, hyva.config, req)) ?? '' : '';
+            const finalCss = entryCss.replace(TOKENS_SLOT, () => tokens);
+            files[0] = { file: css, css: finalCss, root: parse(css, finalCss) };
+            project = themeVariables(files);
+            variables = new Map([...defaults, ...project]);
+            scales.clear();
+            const tailwind = req('@tailwindcss/node');
+            [compiler, designSystem] = await Promise.all([
+                tailwind.compile(finalCss, { base: cssDir, from: css, onDependency: () => {} }),
+                tailwind.__unstable__loadDesignSystem(finalCss, { base: cssDir }),
+            ]);
+            declared = new Set(components.names);
+            parse(`${css} (compiled)`, compiler.build([])).walkRules((rule) => {
+                for (const match of rule.selector.matchAll(/\.((?:\\.|[\w-])+)/g)) declared.add(match[1].replace(/\\(.)/g, '$1'));
+            });
+        })();
+        return ready;
+    };
 
     const resolve = (value) => {
         let out = value;
@@ -122,35 +214,50 @@ function loadSite({ name, config: configFile, css }, req) {
         return out.replace(/\s+/g, ' ').trim();
     };
 
-    const spacing = parseFloat(variables.get('--spacing')) || 0.25;
-    const grid = { px: '1px' };
-    for (let step = 0; step <= 1600; step++) grid[String(step / 4)] = `${(step / 4) * spacing}rem`;
+    // Not every quarter step v4 accepts: any pixel value would become a key (`w-[37px]` → `w-9.25`).
+    const spacingGrid = () => {
+        const unit = String(resolve(variables.get('--spacing') ?? '')).match(/^(\d*\.?\d+)(rem|px)$/);
+        if (!unit) return {};
+        const pixels = Number(unit[1]) * (unit[2] === 'rem' ? 16 : 1);
+        const grid = { px: '1px' };
+        for (const step of [0.5, 1.5, 2.5, 3.5]) grid[String(step)] = `${step * pixels}px`;
+        for (let step = 0; step <= 400; step++) grid[String(step)] = `${step * pixels}px`;
+        return grid;
+    };
 
     const buildScale = (key) => {
         const named = { ...(STATIC_KEYS[key] ?? {}) };
         for (const namespace of NAMED_NAMESPACES[key] ?? []) {
             for (const [variable, value] of variables) {
                 const suffix = variable.startsWith(`${namespace}-`) ? variable.slice(namespace.length + 1) : '';
-                if (suffix && !suffix.includes('--')) named[suffix] = resolve(value);
+                if (!suffix || suffix.includes('--')) continue;
+                // Like a v3 [fontSize, lineHeight] tuple: `text-base` also sets the line height.
+                const lineHeight = variables.get(`${variable}--line-height`);
+                named[suffix] = lineHeight ? [resolve(value), resolve(lineHeight)] : resolve(value);
             }
         }
-        if (!SPACING_KEYS.has(key)) return named;
-        return new Proxy({ ...grid, ...named }, { has: (object, value) => value in object || DYNAMIC_VALUE.test(value) });
+        return SPACING_KEYS.has(key) ? { ...spacingGrid(), ...named } : named;
     };
-    const scales = new Map();
+    const assertReady = (method) => {
+        if (!declared) throw new Error(`tailwind-lint: ${method}() called before loadClasses or loadSignatures`);
+    };
     const scale = (key) => {
+        assertReady('scale');
         if (!scales.has(key)) scales.set(key, buildScale(key));
         return scales.get(key);
     };
 
     return {
         name,
+        version: 4,
+        markers: markers(files),
         postcss,
         covers(absFile) {
             if (absFile.endsWith('.css')) return absFile.startsWith(cssDir + path.sep);
-            return micromatch.isMatch(absFile, globs);
+            return micromatch.isMatch(absFile, globs.include, { ignore: globs.ignore });
         },
         isDefaultShade(color) {
+            assertReady('isDefaultShade');
             if (!/^[a-z]+-\d+$/.test(color)) return false;
             const variable = `--color-${color}`;
             return !project.has(variable) && defaults.has(variable);
@@ -171,13 +278,9 @@ function loadSite({ name, config: configFile, css }, req) {
             };
         },
         async loadSignatures(classNames) {
+            await prepare();
             const missing = new Set(classNames.filter((className) => !signatures.has(className)));
             if (!missing.size) return;
-            compiler ??= await req('@tailwindcss/node').compile(fs.readFileSync(css, 'utf8'), {
-                base: cssDir,
-                from: css,
-                onDependency: () => {},
-            });
             const found = new Map();
             postcss.parse(compiler.build([...missing])).walkRules((rule) => {
                 if (!onlyLayers(rule)) return;
@@ -189,6 +292,20 @@ function loadSite({ name, config: configFile, css }, req) {
                 }
             });
             missing.forEach((className) => signatures.set(className, found.get(className) ?? null));
+        },
+        async loadClasses(raws) {
+            await prepare();
+            const missing = [...new Set(raws)].filter((raw) => !generated.has(raw));
+            if (!missing.length) return;
+            designSystem.candidatesToCss(missing).forEach((output, index) => generated.set(missing[index], output !== null));
+        },
+        generates(raw) {
+            if (!generated.has(raw)) throw new Error(`tailwind-lint: generates(${raw}) called before loadClasses`);
+            return generated.get(raw);
+        },
+        declares(className) {
+            assertReady('declares');
+            return declared.has(className);
         },
         signature(className) {
             return signatures.get(className) ?? null;

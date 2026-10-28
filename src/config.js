@@ -2,26 +2,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const micromatch = require('micromatch');
+const RULES = require('./rules');
 
 const DEFAULT_IGNORE = ['**/node_modules/**'];
 
 function globToRegExp(glob) {
-    let source = '';
-    for (let index = 0; index < glob.length; index++) {
-        const char = glob[index];
-        if (char === '*' && glob[index + 1] === '*') {
-            const slash = glob[index + 2] === '/';
-            source += slash ? '(?:.*/)?' : '.*';
-            index += slash ? 2 : 1;
-        } else if (char === '*') {
-            source += '[^/]*';
-        } else if (char === '?') {
-            source += '[^/]';
-        } else {
-            source += char.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-        }
-    }
-    return new RegExp(`^${source}$`);
+    return micromatch.makeRe(glob, { dot: true });
 }
 
 function normalizeConfig(raw, base) {
@@ -34,7 +21,15 @@ function normalizeConfig(raw, base) {
             css: path.resolve(base, site.css),
         };
     });
+    const ids = new Set(RULES.map((rule) => rule.id));
+    for (const [id, options] of Object.entries(raw.rules ?? {})) {
+        if (!ids.has(id)) throw new Error(`tailwind-lint config: unknown rule "${id}"`);
+        if (options !== false && (typeof options !== 'object' || options === null || (options.hint !== undefined && typeof options.hint !== 'string'))) {
+            throw new Error(`tailwind-lint config: rule "${id}" takes false or { "hint": "…" }`);
+        }
+    }
     return {
+        root: base,
         sites,
         include: (raw.include ?? ['**/*.html', '**/*.php', '**/*.phtml', '**/*.css']).map(globToRegExp),
         ignore: [...DEFAULT_IGNORE, ...(raw.ignore ?? [])].map(globToRegExp),
@@ -45,6 +40,7 @@ function normalizeConfig(raw, base) {
 
 function loadConfig(file) {
     const absolute = path.resolve(file);
+    if (!fs.existsSync(absolute)) throw new Error(`tailwind-lint: config file ${file} not found`);
     return normalizeConfig(JSON.parse(fs.readFileSync(absolute, 'utf8')), process.cwd());
 }
 

@@ -7,8 +7,8 @@ function splitTopLevel(raw, separator) {
     let depth = 0;
     let current = '';
     for (const char of raw) {
-        if (char === '[') depth++;
-        if (char === ']') depth = Math.max(0, depth - 1);
+        if (char === '[' || char === '(') depth++;
+        if (char === ']' || char === ')') depth = Math.max(0, depth - 1);
         if (char === separator && depth === 0) {
             parts.push(current);
             current = '';
@@ -25,9 +25,14 @@ function parseToken(raw) {
     let core = parts.pop();
     const variants = parts;
     let important = false;
+    let importantSuffix = false;
     if (core.startsWith('!')) {
         important = true;
         core = core.slice(1);
+    } else if (core.endsWith('!')) {
+        important = true;
+        importantSuffix = true;
+        core = core.slice(0, -1);
     }
     let negative = false;
     if (core.startsWith('-')) {
@@ -36,7 +41,7 @@ function parseToken(raw) {
     }
     let opacity = null;
     if (!FRACTION.test(core)) {
-        const match = core.match(/^(.+)\/(\d+|\[[^\]]+\])$/);
+        const match = core.match(/^(.+)\/(\d+|\[[^\]]+\]|\([^)]+\))$/);
         if (match) {
             core = match[1];
             opacity = match[2];
@@ -49,10 +54,10 @@ function parseToken(raw) {
         property = propertyMatch[1];
         arbitrary = propertyMatch[2];
     } else {
-        const valueMatch = core.match(/^.+?-\[(.+)\]$/);
-        if (valueMatch) arbitrary = valueMatch[1];
+        const valueMatch = core.match(/^.+?-(?:\[(.+)\]|\((--.+)\))$/);
+        if (valueMatch) arbitrary = valueMatch[1] ?? valueMatch[2];
     }
-    return { raw, variants, important, negative, core, opacity, arbitrary, property };
+    return { raw, variants, important, importantSuffix, negative, core, opacity, arbitrary, property };
 }
 
 function matchPrefix(core, prefixes) {
@@ -63,7 +68,8 @@ function matchPrefix(core, prefixes) {
 }
 
 function rebuild(token, core) {
-    const base = `${token.important ? '!' : ''}${token.negative ? '-' : ''}${core}${token.opacity ? `/${token.opacity}` : ''}`;
+    const [before, after] = token.important ? (token.importantSuffix ? ['', '!'] : ['!', '']) : ['', ''];
+    const base = `${before}${token.negative ? '-' : ''}${core}${token.opacity ? `/${token.opacity}` : ''}${after}`;
     return [...token.variants, base].join(':');
 }
 

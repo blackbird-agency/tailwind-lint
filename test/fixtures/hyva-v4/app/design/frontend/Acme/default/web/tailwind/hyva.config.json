@@ -1,0 +1,4 @@
+{
+    "tailwind": { "exclude": [{ "src": "vendor/acme/excluded" }, { "src": "vendor/acme/kept", "keepSource": true }] },
+    "tokens": { "values": { "color": { "brand": { "500": "#123456" } } } }
+}

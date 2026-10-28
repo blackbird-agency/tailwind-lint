@@ -13,6 +13,6 @@ module.exports = {
                 const match = matchPrefix(token.core, COLOR_PREFIXES);
                 return match && site.isDefaultShade(match.value);
             })
-            .map((token) => ({ token: token.raw, message: `\`${token.raw}\` is a default Tailwind palette shade, not a theme colour: use a theme alias` }));
+            .map((token) => ({ token, message: `\`${token.raw}\` is a default Tailwind palette shade, not a theme colour: use a theme alias` }));
     },
 };

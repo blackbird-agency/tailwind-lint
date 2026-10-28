@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { analyseLine, analyseCss, addedLineNumbers } = require('./extract');
+const { analyseTemplate, analyseCss, addedLineNumbers } = require('./extract');
 const { parseToken, bare } = require('./token');
 const RULES = require('./rules');
 
@@ -14,67 +14,84 @@ function activeRules(options = {}) {
         .map((rule) => ({ rule, hint: options[rule.id]?.hint }));
 }
 
-function lintEntries(entries, sites, rules) {
+function lintEntries(entry, reportable, sites, rules) {
+    const position = ({ token }) => `${token.line}|${token.index}`;
+    const found = new Map();
+    for (const { rule, hint } of rules) {
+        let violations;
+        if (!rule.siteDependent) {
+            violations = rule.check(entry);
+        } else if (!sites.length) {
+            continue;
+        } else {
+            const perSite = sites.map((site) => rule.check(entry, site));
+            violations = perSite[0].filter((violation) => perSite.every((list) => list.some((other) => position(other) === position(violation))));
+        }
+        const seen = new Map();
+        for (const violation of violations) {
+            if (!reportable.has(violation.token.line) || seen.has(position(violation))) continue;
+            seen.set(position(violation), hint ? { ...violation, message: `${violation.message} (${hint})` } : violation);
+        }
+        found.set(rule, seen);
+    }
+    const order = rules.map(({ rule }) => rule);
     const violations = [];
-    for (const entry of entries) {
-        const seen = new Set();
-        for (const { rule, hint } of rules) {
-            let found;
-            if (!rule.siteDependent) {
-                found = rule.check(entry);
-            } else if (!sites.length) {
-                continue;
-            } else {
-                const perSite = sites.map((site) => rule.check(entry, site));
-                found = perSite[0].filter((violation) => perSite.every((list) => list.some((other) => other.token === violation.token)));
-            }
-            for (const violation of found) {
-                const key = `${rule.id}|${violation.token}`;
-                if (seen.has(key)) continue;
-                seen.add(key);
-                const message = hint ? `${violation.message} (${hint})` : violation.message;
-                violations.push({ line: entry.line, rule: rule.id, token: violation.token, message });
-            }
+    for (const [rule, seen] of found) {
+        const superseding = order.filter((other) => other.supersedes?.includes(rule.id));
+        for (const [key, { token, message }] of seen) {
+            if (superseding.some((other) => found.get(other)?.has(key))) continue;
+            violations.push({ line: token.line, index: token.index, order: order.indexOf(rule), rule: rule.id, token: token.raw, message });
         }
     }
-    return violations;
+    return violations
+        .sort((a, b) => a.line - b.line || a.index - b.index || a.order - b.order)
+        .map(({ line, rule, token, message }) => ({ line, rule, token, message }));
 }
 
-async function prepareSites(entries, sites) {
-    const classNames = [...new Set(entries.flatMap((entry) => entry.groups.flat().map(bare)))];
-    await Promise.all(sites.map((site) => site.loadSignatures(classNames)));
-}
-
-function parseEntries(entries) {
-    return entries.map((entry) => ({
-        ...entry,
-        tokens: entry.tokens.map(parseToken),
-        groups: entry.groups.map((group) => group.map(parseToken)),
-        staticGroups: entry.staticGroups.map((group) => group.map(parseToken)),
+async function prepareSites(entry, sites) {
+    const classNames = [...new Set(entry.groups.flat().map(bare))];
+    const raws = [...new Set([
+        ...[...entry.tokens, ...entry.groups.flat()].map((token) => token.raw),
+        ...RULES.flatMap((rule) => rule.candidates?.(entry) ?? []),
+    ])];
+    await Promise.all(sites.map(async (site) => {
+        await site.loadSignatures(classNames);
+        await site.loadClasses(raws);
     }));
+}
+
+function parseEntry({ looseTokens, groups }) {
+    const parse = (token) => ({ ...parseToken(token.raw), line: token.line, index: token.index });
+    return {
+        tokens: looseTokens.map(parse),
+        groups: groups.map((group) => group.tokens.map(parse)),
+        staticGroups: groups.filter((group) => group.staticTokens.length).map((group) => group.staticTokens.map(parse)),
+        fragments: groups.flatMap((group) => group.fragments.map(parse)),
+    };
 }
 
 async function lintFile(root, file, sites, config, { all = false } = {}) {
     const relative = path.relative(root, path.resolve(root, file)).split(path.sep).join('/');
     const absolute = path.resolve(root, relative);
     const included = config.include.some((pattern) => pattern.test(relative));
-    if (!included || config.ignore.some((pattern) => pattern.test(relative)) || !fs.existsSync(absolute)) return [];
+    if (!included || config.ignore.some((pattern) => pattern.test(relative))) return [];
+    if (!fs.existsSync(absolute)) throw new Error(`tailwind-lint: ${relative} does not exist`);
     const fileSites = sites.filter((site) => site.covers(absolute));
     const content = fs.readFileSync(absolute, 'utf8');
-    const lines = content.split('\n');
-    const added = addedLineNumbers(root, relative, lines.length, { all, baselines: config.baselines });
+    const added = addedLineNumbers(root, relative, content.split('\n').length, { all, baselines: config.baselines });
     if (!added.size) return [];
-    let entries;
+    let analysis;
+    let reportable = added;
     if (relative.endsWith('.css')) {
         if (!fileSites.length) return [];
-        entries = analyseCss(content, added, fileSites[0].postcss);
+        analysis = analyseCss(content, added, fileSites[0].postcss);
+        reportable = new Set(analysis.groups.flatMap((group) => group.tokens.map((token) => token.line)));
     } else {
-        const php = PHP_EXTENSIONS.has(path.extname(relative));
-        entries = [...added].sort((a, b) => a - b).map((line) => ({ line, ...analyseLine(lines[line - 1] ?? '', { php }) }));
+        analysis = analyseTemplate(content, { php: PHP_EXTENSIONS.has(path.extname(relative)) });
     }
-    const parsed = parseEntries(entries);
-    await prepareSites(parsed, fileSites);
-    return lintEntries(parsed, fileSites, activeRules(config.rules)).map((violation) => ({ file: relative, ...violation }));
+    const entry = parseEntry(analysis);
+    await prepareSites(entry, fileSites);
+    return lintEntries(entry, reportable, fileSites, activeRules(config.rules)).map((violation) => ({ file: relative, ...violation }));
 }
 
-module.exports = { activeRules, lintEntries, lintFile, parseEntries, prepareSites };
+module.exports = { activeRules, lintEntries, lintFile, parseEntry, prepareSites };

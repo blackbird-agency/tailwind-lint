@@ -17,9 +17,11 @@
   },
   "scripts": {
     "build": "esbuild bin/lint.js --bundle --platform=node --target=node18 --outfile=dist/tailwind-lint.js",
-    "test": "node --test test/"
+    "pretest": "npm ci --prefix test/fixtures/hyva-v4/app/design/frontend/Acme/default/web/tailwind --no-audit --no-fund",
+    "test": "node --test test/*.test.js"
   },
   "devDependencies": {
+    "@hyva-themes/hyva-modules": "1.3.0",
     "esbuild": "^0.25.0",
     "micromatch": "^4.0.8",
     "postcss": "^8.4.33",

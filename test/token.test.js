@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseToken, matchPrefix, rebuild, bare } = require('../src/token');
-const { COLOR_PREFIXES } = require('../src/utilities');
+const { COLOR_PREFIXES, RUNTIME_PREFIXES } = require('../src/utilities');
 
 test('variants, important, negative', () => {
     const t = parseToken('md:hover:!-mt-4');
@@ -48,4 +48,22 @@ test('rebuild keeps variants, important, negative and opacity', () => {
 test('bare drops variants and important, keeps negative and opacity', () => {
     assert.equal(bare(parseToken('md:!-mt-4')), '-mt-4');
     assert.equal(bare(parseToken('hover:bg-primary/50')), 'bg-primary/50');
+});
+
+test('runtime prefixes cover colors, scales and extra families, longest first', () => {
+    for (const prefix of ['bg', 'border-x', 'gap-y', 'rounded-tl', 'font', 'grid-cols', 'col-start', 'tracking']) {
+        assert.ok(RUNTIME_PREFIXES.includes(prefix), prefix);
+    }
+    assert.equal(new Set(RUNTIME_PREFIXES).size, RUNTIME_PREFIXES.length);
+    assert.ok(RUNTIME_PREFIXES.every((prefix, index) => !index || RUNTIME_PREFIXES[index - 1].length >= prefix.length));
+});
+
+test('v4 syntax: important suffix, variable shorthand and functional variants', () => {
+    const suffix = parseToken('md:p-4!');
+    assert.deepEqual([suffix.core, suffix.important], ['p-4', true]);
+    assert.equal(rebuild(suffix, 'p-6'), 'md:p-6!');
+    const variable = parseToken('hover:bg-(--brand)/50');
+    assert.deepEqual([variable.core, variable.arbitrary, variable.opacity], ['bg-(--brand)', '--brand', '50']);
+    assert.deepEqual(parseToken('supports-(display:grid):grid').variants, ['supports-(display:grid)']);
+    assert.equal(parseToken('bg-red/(--alpha)').opacity, '(--alpha)');
 });

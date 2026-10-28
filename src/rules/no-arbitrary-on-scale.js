@@ -24,7 +24,7 @@ module.exports = {
                 .find(([, value]) => toPixels(Array.isArray(value) ? value[0] : value) === pixels);
             if (!entry) continue;
             const fixed = rebuild(token, `${match.prefix}-${entry[0]}`);
-            violations.push({ token: token.raw, message: `\`${token.raw}\` matches a scale key: use \`${fixed}\`` });
+            violations.push({ token, message: `\`${token.raw}\` matches a scale key: use \`${fixed}\`` });
         }
         return violations;
     },
