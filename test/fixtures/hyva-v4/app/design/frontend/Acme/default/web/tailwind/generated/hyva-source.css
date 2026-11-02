@@ -1,0 +1,6 @@
+@source "../../../../../../../../vendor/acme/kept";
+@source "../../../../../../../../vendor/acme/source-only";
+
+@import "../../../../../../../../vendor/acme/source-only/view/frontend/tailwind/tailwind-source.css";
+
+@import "../../../../../../../../app/code/Acme/Widget/view/frontend/tailwind/module.css";

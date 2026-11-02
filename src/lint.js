@@ -11,20 +11,21 @@ const PHP_EXTENSIONS = new Set(['.php', '.phtml']);
 function activeRules(options = {}) {
     return RULES
         .filter((rule) => options[rule.id] !== false)
-        .map((rule) => ({ rule, hint: options[rule.id]?.hint }));
+        .map((rule) => ({ rule, options: options[rule.id] || {} }));
 }
 
 function lintEntries(entry, reportable, sites, rules) {
     const position = ({ token }) => `${token.line}|${token.index}`;
     const found = new Map();
-    for (const { rule, hint } of rules) {
+    for (const { rule, options = {} } of rules) {
+        const { hint } = options;
         let violations;
         if (!rule.siteDependent) {
-            violations = rule.check(entry);
+            violations = rule.check(entry, undefined, options);
         } else if (!sites.length) {
             continue;
         } else {
-            const perSite = sites.map((site) => rule.check(entry, site));
+            const perSite = sites.map((site) => rule.check(entry, site, options));
             violations = perSite[0].filter((violation) => perSite.every((list) => list.some((other) => position(other) === position(violation))));
         }
         const seen = new Map();

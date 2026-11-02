@@ -3,7 +3,6 @@
 const fs = require('fs');
 const path = require('path');
 const { assertLocked } = require('../lockfile');
-const { readHyvaConfig, isHyvaTheme, hyvaModules, hyvaSourceCss, hyvaTokensCss, assertMagentoRoot } = require('../hyva');
 const postcss = require('postcss');
 const micromatch = require('micromatch');
 
@@ -31,7 +30,6 @@ const STATIC_KEYS = {
 
 // Comments are matched first so that an @import inside a comment is skipped (group 1 unset).
 const IMPORT = /\/\*[\s\S]*?\*\/|@import\s+(?:url\()?\s*["']([^"']+)["'][^;]*;?/g;
-const TOKENS_SLOT = '/* tailwind-lint: hyva-tokens.css */';
 
 function parse(file, css) {
     try {
@@ -41,48 +39,32 @@ function parse(file, css) {
     }
 }
 
-// Targets inside generated/ are resolved without touching the disk: their files may be stale.
-function resolveImport(from, target, generatedDir) {
+function resolveImport(from, target) {
     if (!target.startsWith('.') && !path.isAbsolute(target)) return null;
     const resolved = path.resolve(path.dirname(from), target);
     if (resolved.endsWith('.css')) return resolved;
-    if (resolved.startsWith(generatedDir + path.sep)) return `${resolved}.css`;
-    return [`${resolved}.css`, path.join(resolved, 'index.css')].find(fs.existsSync) ?? resolved;
+    return [`${resolved}.css`, path.join(resolved, 'index.css')].find(fs.existsSync) ?? `${resolved}.css`;
 }
 
-function unrebuildable(file, target) {
-    return new Error(`tailwind-lint: ${file} imports ${target}, a generated file tailwind-lint cannot rebuild`);
-}
-
-function rewriteEntry(entry, generatedDir, hyva) {
-    const isGenerated = (target) => target.startsWith(generatedDir + path.sep);
-    return fs.readFileSync(entry, 'utf8').replace(IMPORT, (whole, target) => {
-        if (target === undefined) return whole;
-        const resolved = resolveImport(entry, target, generatedDir);
-        if (!resolved || !isGenerated(resolved)) return whole;
-        const name = path.relative(generatedDir, resolved);
-        if (hyva && name === 'hyva-source.css') return hyva.sourceCss;
-        if (hyva && name === 'hyva-tokens.css') return TOKENS_SLOT;
-        throw unrebuildable(entry, resolved);
-    });
-}
-
-function collectFiles(entry, css, generatedDir) {
+function collectFiles(entry) {
     const files = [];
     const seen = new Set();
-    const visit = (file, text) => {
+    const visit = (file) => {
         if (seen.has(file)) return;
         seen.add(file);
+        const text = fs.readFileSync(file, 'utf8');
         files.push({ file, css: text, root: parse(file, text) });
         for (const match of text.matchAll(IMPORT)) {
             if (match[1] === undefined) continue;
-            const target = resolveImport(file, match[1], generatedDir);
+            const target = resolveImport(file, match[1]);
             if (!target) continue;
-            if (target.startsWith(generatedDir + path.sep)) throw unrebuildable(file, target);
-            if (fs.existsSync(target)) visit(target, fs.readFileSync(target, 'utf8'));
+            if (!fs.existsSync(target)) {
+                throw new Error(`tailwind-lint: ${file} imports ${target}, which does not exist: if a build step generates it, build the site first`);
+            }
+            visit(target);
         }
     };
-    visit(entry, css);
+    visit(entry);
     return files;
 }
 
@@ -155,26 +137,15 @@ function buildComponentIndex(files) {
     return { names, applied };
 }
 
-function hyvaContext(root, cssDir, name, configFile) {
-    if (!root) throw new Error(`tailwind-lint: site ${name} is a Hyvä theme, the Magento root is required`);
-    assertMagentoRoot(configFile, root);
-    const config = readHyvaConfig(cssDir);
-    const area = config?.tailwind?.area ?? 'frontend';
-    return { config, sourceCss: hyvaSourceCss(root, hyvaModules(root, config), area) };
-}
-
-function loadSite({ name, config: configFile, css }, req, root) {
-    const hyvaTheme = isHyvaTheme(path.dirname(configFile), fs.existsSync(css) ? fs.readFileSync(css, 'utf8') : '');
-    assertLocked(req, ['tailwindcss', '@tailwindcss/node', ...(hyvaTheme ? ['@hyva-themes/hyva-modules'] : [])]);
+function loadSite({ name, css }, req) {
+    assertLocked(req, ['tailwindcss', '@tailwindcss/node']);
     const cssDir = path.dirname(css);
-    const generatedDir = path.join(cssDir, 'generated');
-    const hyva = hyvaTheme ? hyvaContext(root, cssDir, name, configFile) : null;
-    const entryCss = rewriteEntry(css, generatedDir, hyva);
-    const files = collectFiles(css, entryCss, generatedDir);
+    const files = collectFiles(css);
+    const entryCss = files[0].css;
     const themeFile = req.resolve('tailwindcss/theme.css');
     const defaults = themeVariables([{ root: parse(themeFile, fs.readFileSync(themeFile, 'utf8')) }]);
-    let project = themeVariables(files);
-    let variables = new Map([...defaults, ...project]);
+    const project = themeVariables(files);
+    const variables = new Map([...defaults, ...project]);
     const globs = sourceGlobs(files);
     const components = buildComponentIndex(files);
     const signatures = new Map();
@@ -187,16 +158,10 @@ function loadSite({ name, config: configFile, css }, req, root) {
     const scales = new Map();
     const prepare = () => {
         ready ??= (async () => {
-            const tokens = entryCss.includes(TOKENS_SLOT) ? (await hyvaTokensCss(cssDir, hyva.config, req)) ?? '' : '';
-            const finalCss = entryCss.replace(TOKENS_SLOT, () => tokens);
-            files[0] = { file: css, css: finalCss, root: parse(css, finalCss) };
-            project = themeVariables(files);
-            variables = new Map([...defaults, ...project]);
-            scales.clear();
             const tailwind = req('@tailwindcss/node');
             [compiler, designSystem] = await Promise.all([
-                tailwind.compile(finalCss, { base: cssDir, from: css, onDependency: () => {} }),
-                tailwind.__unstable__loadDesignSystem(finalCss, { base: cssDir }),
+                tailwind.compile(entryCss, { base: cssDir, from: css, onDependency: () => {} }),
+                tailwind.__unstable__loadDesignSystem(entryCss, { base: cssDir }),
             ]);
             declared = new Set(components.names);
             parse(`${css} (compiled)`, compiler.build([])).walkRules((rule) => {

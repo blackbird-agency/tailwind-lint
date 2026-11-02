@@ -70,7 +70,7 @@ test('v3: existing fixture exposes generates/declares', async () => {
     for (const name of ['btn', 'btn-primary-small', 'title-font', 'step']) assert.ok(site.declares(name), name);
 });
 
-test('v3 Hyvä: module config and CSS are merged without hyva-themes.json, whatever the cwd', async () => {
+test('v3 Hyvä: module config and CSS come from hyva-themes.json, whatever the cwd', async () => {
     const before = process.cwd();
     process.chdir(os.tmpdir());
     try {
@@ -85,34 +85,58 @@ test('v3 Hyvä: module config and CSS are merged without hyva-themes.json, whate
     assert.equal(process.cwd(), before);
 });
 
-test('v3 Hyvä: a root that is not the Magento root hyva-modules resolves is an explicit error', () => {
-    const root = path.join(__dirname, 'fixtures', 'hyva-v3');
-    const wrongRoot = path.join(root, 'app/design/frontend/Acme');
-    const configFile = path.join(wrongRoot, 'default/web/tailwind/tailwind.config.js');
-    const config = normalizeConfig({
-        sites: [{ name: 'hyva-v3', config: 'default/web/tailwind/tailwind.config.js', css: 'default/web/tailwind/tailwind-source.css' }],
-    }, wrongRoot);
-    assert.throws(() => loadSites(config), { message: `tailwind-lint: ${configFile} resolves the Magento root to ${root}, but tailwind-lint runs with root ${wrongRoot}` });
+const hyvaV3Root = path.join(__dirname, 'fixtures', 'hyva-v3');
+
+function withHyvaV3Theme(files, run) {
+    const theme = 'app/design/frontend/Acme/other/web/tailwind';
+    const dir = path.join(hyvaV3Root, theme);
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+        fs.writeFileSync(path.join(dir, 'tailwind-source.css'), '@tailwind utilities;\n');
+        for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), content);
+        return run(normalizeConfig({ sites: [{ name: 'other', config: `${theme}/tailwind.config.js`, css: `${theme}/tailwind-source.css` }] }, hyvaV3Root));
+    } finally {
+        fs.rmSync(path.join(hyvaV3Root, 'app/design/frontend/Acme/other'), { recursive: true, force: true });
+    }
+}
+
+test('v3 Hyvä: the theme postcss.config.js options apply to the module CSS', async () => {
+    await withHyvaV3Theme({
+        'tailwind.config.js': "const { mergeTailwindConfig } = require('@hyva-themes/hyva-modules');\nmodule.exports = mergeTailwindConfig({ content: [] });\n",
+        'postcss.config.js': "const { postcssImportHyvaModules } = require('@hyva-themes/hyva-modules');\nmodule.exports = { plugins: [postcssImportHyvaModules({ excludeDirs: ['app/code/Acme/Widget'] })] };\n",
+    }, async (config) => {
+        const [hyva] = loadSites(config);
+        await hyva.loadClasses(['bg-widget']);
+        assert.ok(hyva.generates('bg-widget'));
+        assert.equal(hyva.declares('acme-v3'), false);
+    });
 });
 
-test('v3 Hyvä: a theme config that throws still restores the cwd and fs.readFileSync', () => {
-    const root = path.join(__dirname, 'fixtures', 'hyva-v3');
-    const theme = 'app/design/frontend/Acme/broken/web/tailwind';
-    const dir = path.join(root, theme);
-    fs.mkdirSync(dir, { recursive: true });
-    const before = process.cwd();
-    const { readFileSync } = fs;
+test('v3 Hyvä: a missing hyva-themes.json is an explicit error, without hyva-modules output', () => {
+    const themesJson = path.join(hyvaV3Root, 'app/etc/hyva-themes.json');
+    const content = fs.readFileSync(themesJson, 'utf8');
+    const { info } = console;
+    const printed = [];
+    console.info = (...args) => printed.push(args);
+    fs.rmSync(themesJson);
     try {
-        fs.writeFileSync(path.join(dir, 'tailwind.config.js'), "require('@hyva-themes/hyva-modules');\nthrow new Error('boom');\n");
-        fs.writeFileSync(path.join(dir, 'tailwind-source.css'), '@tailwind utilities;\n');
-        const config = normalizeConfig({ sites: [{ name: 'broken', config: `${theme}/tailwind.config.js`, css: `${theme}/tailwind-source.css` }] }, root);
-        assert.throws(() => loadSites(config), /boom/);
-        assert.equal(process.cwd(), before);
-        assert.equal(fs.readFileSync, readFileSync);
+        const themeDir = path.join(hyvaV3Root, hyvaV3Theme);
+        assert.throws(() => loadSites(hyvaV3Config), { message: `tailwind-lint: no app/etc/hyva-themes.json above ${themeDir}: run bin/magento hyva:config:generate` });
+        assert.deepEqual(printed, []);
     } finally {
-        fs.rmSync(path.join(root, 'app/design/frontend/Acme/broken'), { recursive: true, force: true });
-        process.chdir(before);
+        console.info = info;
+        fs.writeFileSync(themesJson, content);
     }
+});
+
+test('v3 Hyvä: a theme config that throws still restores the cwd and console.info', () => {
+    const before = process.cwd();
+    const { info } = console;
+    withHyvaV3Theme({ 'tailwind.config.js': "require('@hyva-themes/hyva-modules');\nthrow new Error('boom');\n" }, (config) => {
+        assert.throws(() => loadSites(config), /boom/);
+    });
+    assert.equal(process.cwd(), before);
+    assert.equal(console.info, info);
 });
 
 test('v3: classes sharing a screen variant in one batch are each generated', async () => {

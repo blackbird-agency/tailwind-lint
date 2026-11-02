@@ -2,6 +2,7 @@
 @import "./components/card.css";
 @import "./generated/hyva-source.css";
 @import "./generated/hyva-tokens.css";
+@import "./generated/hyva-fonts.css";
 
 @source "./templates/**/*.phtml";
 

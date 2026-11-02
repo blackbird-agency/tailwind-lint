@@ -1,0 +1,5 @@
+{
+    "extensions": [
+        { "src": "app/code/Acme/Widget" }
+    ]
+}

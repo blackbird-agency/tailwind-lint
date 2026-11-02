@@ -14,24 +14,15 @@ const hyvaSite = (css = 'tailwind-source.css') => loadSites(normalizeConfig({
     sites: [{ name: 'hyva', config: `${theme}/package.json`, css: `${theme}/${css}` }],
 }, root))[0];
 
-const CLASSES = ['bg-brand-500', 'hover:bg-brand-500', 'bg-(--color)', 'bg-black/50', 'grow', 'flx', 'hovr:p-4'];
+const CLASSES = ['bg-brand-500', 'hover:bg-brand-500', 'font-brand', 'bg-(--color)', 'bg-black/50', 'grow', 'flx', 'hovr:p-4'];
 
-async function snapshot(site) {
-    await site.loadClasses(CLASSES);
-    const names = ['acme-widget', 'acme-source', 'card', 'card-title', 'acme-excluded', 'acme-kept'];
-    return {
-        generates: CLASSES.map((raw) => site.generates(raw)),
-        declares: names.map((name) => site.declares(name)),
-        markers: [...site.markers].sort(),
-    };
-}
-
-test('v4: classes from modules, theme CSS and tokens are known without generated files', async () => {
+test('v4: classes from modules, theme CSS, tokens and fonts are known through the generated files', async () => {
     const site = hyvaSite();
     await site.loadClasses(CLASSES);
     assert.equal(site.version, 4);
     assert.ok(site.generates('bg-brand-500'));
     assert.ok(site.generates('hover:bg-brand-500'));
+    assert.ok(site.generates('font-brand'));
     assert.ok(site.generates('bg-(--color)'));
     assert.ok(site.generates('bg-black/50'));
     assert.ok(site.generates('grow'));
@@ -68,31 +59,26 @@ test('v4: @source not excludes templates from covers', () => {
     }
 });
 
-test('v4: a stale generated folder does not change the result', async () => {
-    const expected = await snapshot(hyvaSite());
-    const generated = path.join(themeDir, 'generated');
-    fs.mkdirSync(generated);
+test('v4: generated files are read from disk, as Tailwind reads them', async () => {
+    const tokens = path.join(themeDir, 'generated/hyva-tokens.css');
+    const original = fs.readFileSync(tokens, 'utf8');
+    fs.writeFileSync(tokens, '@theme {\n    --color-other-500: #654321;\n}\n');
     try {
-        const excluded = path.join(root, 'vendor/acme/excluded/view/frontend/tailwind/module.css');
-        fs.writeFileSync(path.join(generated, 'hyva-source.css'), `@source "${path.join(root, 'vendor/acme/excluded')}";\n@import "${excluded}";\n`);
-        fs.writeFileSync(path.join(generated, 'hyva-tokens.css'), '@theme {\n    --color-stale-500: #654321;\n}\n');
         const site = hyvaSite();
-        assert.deepEqual(await snapshot(site), expected);
-        assert.equal(site.declares('acme-excluded'), false);
-        assert.equal(site.covers(path.join(root, 'vendor/acme/excluded/view/frontend/templates/a.phtml')), false);
-        await site.loadClasses(['bg-stale-500']);
-        assert.equal(site.generates('bg-stale-500'), false);
+        await site.loadClasses(['bg-other-500', 'bg-brand-500']);
+        assert.ok(site.generates('bg-other-500'));
+        assert.equal(site.generates('bg-brand-500'), false);
     } finally {
-        fs.rmSync(generated, { recursive: true, force: true });
+        fs.writeFileSync(tokens, original);
     }
 });
 
-test('v4: an unknown generated import is an explicit error', () => {
+test('v4: a missing import is an explicit error', () => {
     const entry = path.join(themeDir, 'other-entry.css');
     fs.writeFileSync(entry, '@import "tailwindcss" source(none);\n@import "./generated/other.css";\n');
     try {
         assert.throws(() => hyvaSite('other-entry.css'), (error) => error.message
-            === `tailwind-lint: ${entry} imports ${path.join(themeDir, 'generated/other.css')}, a generated file tailwind-lint cannot rebuild`);
+            === `tailwind-lint: ${entry} imports ${path.join(themeDir, 'generated/other.css')}, which does not exist: if a build step generates it, build the site first`);
     } finally {
         fs.rmSync(entry, { force: true });
     }
@@ -118,25 +104,17 @@ async function withEntry(name, css, run) {
     }
 }
 
-test('v4: an extensionless generated import does not depend on a stale generated file', async () => {
+test('v4: an extensionless import resolves to its .css file', async () => {
     const css = '@import "tailwindcss" source(none);\n@import "./generated/hyva-source";\n@import "./generated/hyva-tokens";\n';
     await withEntry('extensionless-entry.css', css, async () => {
-        const expected = await snapshot(hyvaSite('extensionless-entry.css'));
-        assert.equal(expected.declares[0], true);
-        const generated = path.join(themeDir, 'generated');
-        fs.mkdirSync(generated);
-        try {
-            const excluded = path.join(root, 'vendor/acme/excluded/view/frontend/tailwind/module.css');
-            fs.writeFileSync(path.join(generated, 'hyva-source.css'), `@import "${excluded}";\n`);
-            fs.writeFileSync(path.join(generated, 'hyva-tokens.css'), '@theme {\n    --color-stale-500: #654321;\n}\n');
-            assert.deepEqual(await snapshot(hyvaSite('extensionless-entry.css')), expected);
-        } finally {
-            fs.rmSync(generated, { recursive: true, force: true });
-        }
+        const site = hyvaSite('extensionless-entry.css');
+        await site.loadClasses(['bg-brand-500']);
+        assert.ok(site.declares('acme-widget'));
+        assert.ok(site.generates('bg-brand-500'));
     });
 });
 
-test('v4: generated imports inside CSS comments are ignored', async () => {
+test('v4: imports inside CSS comments are ignored', async () => {
     const css = '@import "tailwindcss" source(none);\n/* @import "./generated/other.css"; */\n@import "./generated/hyva-source.css";\n';
     await withEntry('commented-entry.css', css, async () => {
         const site = hyvaSite('commented-entry.css');
@@ -176,13 +154,4 @@ test('v4: every public method is ready after loadSignatures, and guarded before'
     assert.equal(site.scale('width')['9.25'], undefined);
     assert.deepEqual(site.scale('fontSize').base, ['1rem', 'calc(1.5 / 1)']);
     assert.ok(site.declares('acme-widget'));
-});
-
-test('v4 Hyvä: a root that is not the Magento root of the theme is an explicit error', () => {
-    const wrongRoot = path.join(root, 'app/design/frontend/Acme');
-    const configFile = path.join(wrongRoot, 'default/web/tailwind/package.json');
-    const config = normalizeConfig({
-        sites: [{ name: 'hyva', config: 'default/web/tailwind/package.json', css: 'default/web/tailwind/tailwind-source.css' }],
-    }, wrongRoot);
-    assert.throws(() => loadSites(config), { message: `tailwind-lint: ${configFile} resolves the Magento root to ${root}, but tailwind-lint runs with root ${wrongRoot}` });
 });

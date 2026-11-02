@@ -1,0 +1,11 @@
+@font-face {
+    font-family: Acme;
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("../fonts/acme-regular.woff2") format("woff2");
+}
+
+@theme {
+    --font-brand: Acme, sans-serif;
+}

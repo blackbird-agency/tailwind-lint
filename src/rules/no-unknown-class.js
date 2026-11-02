@@ -1,19 +1,29 @@
 'use strict';
 
+const path = require('path');
 const { RUNTIME_PREFIXES } = require('../utilities');
 const { parseToken, bare } = require('../token');
+const { cssFileClasses } = require('../css-files');
 
 module.exports = {
     id: 'no-unknown-class',
     siteDependent: true,
     // A class Tailwind does not generate is not a palette shade either (`--color-*: initial`).
     supersedes: ['no-default-palette-shade'],
-    check({ groups, fragments = [] }, site) {
+    options: {
+        cssFiles: {
+            valid: (value) => Array.isArray(value) && value.every((pattern) => typeof pattern === 'string'),
+            resolve: (value, base) => value.map((pattern) => path.resolve(base, pattern)),
+        },
+    },
+    check({ groups, fragments = [] }, site, { cssFiles } = {}) {
         const violations = [];
         const variable = site.version === 4 ? 'bg-(--color)' : 'bg-[--color]';
+        const external = cssFileClasses(cssFiles);
+        const declared = (token) => site.declares(bare(token)) || external.has(bare(token));
         for (const token of groups.flat()) {
             const { raw, core, variants } = token;
-            if (site.generates(raw) || (!variants.length && site.declares(bare(token))) || site.markers.has(core) || /^(group|peer)\/[\w-]+$/.test(core)) continue;
+            if (site.generates(raw) || (!variants.length && declared(token)) || site.markers.has(core) || /^(group|peer)\/[\w-]+$/.test(core)) continue;
             violations.push({ token, message: `\`${raw}\` is neither a Tailwind class nor a class declared in the site CSS` });
         }
         for (const token of fragments) {

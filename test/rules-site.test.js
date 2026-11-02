@@ -1,6 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { parseToken } = require('../src/token');
 const fakeSite = require('./helpers/fake-site');
 const shade = require('../src/rules/no-default-palette-shade');
@@ -75,6 +78,18 @@ test('no-conflicting-classes ignores conditional classes', () => {
 
 test('no-unknown-class', () => {
     assert.deepEqual(flagged(unknownClass, [], [['p-4', 'flx', 'btn', 'md:btn', 'group', 'group/item', 'hovr:p-4']]), ['flx', 'md:btn', 'hovr:p-4']);
+});
+
+test('no-unknown-class knows the classes of cssFiles, without variants', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tailwind-lint-rule-'));
+    try {
+        fs.writeFileSync(path.join(dir, 'guide.css'), '.uig-grid .uig-cell { display: grid; }');
+        const options = { cssFiles: [path.join(dir, '*.css')] };
+        const result = unknownClass.check(entry([], [['uig-grid', 'uig-cell', 'md:uig-cell', 'uig-other']]), site, options);
+        assert.deepEqual(result.map((v) => v.token.raw), ['md:uig-cell', 'uig-other']);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
 });
 
 test('no-unknown-class reports Tailwind fragments only, with a version-specific hint', () => {

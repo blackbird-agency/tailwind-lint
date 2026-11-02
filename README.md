@@ -3,6 +3,26 @@
 Checks the Tailwind classes of templates and stylesheets against each site's own Tailwind
 build, v3 or v4.
 
+Tailwind fails silently: a class that does not exist (`flx`), a shade from the default palette
+(`bg-blue-100` in a theme with its own colours) or two classes fighting over one property
+(`p-4 p-6`) compile without a warning. tailwind-lint reports them when the code is written.
+
+## How it works
+
+- **Tailwind decides what exists.** Each site is checked with its own installed `tailwindcss`,
+  which must match its `package-lock.json`.
+- **The site is read as its build reads it.** What a build step generates must exist, as for
+  the real build:
+  - v4: every `@import` of the entry stylesheet is followed, including Hyvä's
+    `web/tailwind/generated/*.css`. After changing `hyva.config.json` or the installed modules,
+    run `npm run generate`.
+  - v3 Hyvä: the modules come from `app/etc/hyva-themes.json`, through hyva-modules: their
+    Tailwind config via `mergeTailwindConfig`, their CSS via the `postcssImportHyvaModules` of
+    the theme's `postcss.config.js`, with its options. After changing the installed modules,
+    run `bin/magento hyva:config:generate`.
+- **Only new code is reported.** By default, only the lines added since `HEAD` are checked, so
+  existing code is reported once someone touches it.
+
 ## Rules
 
 | Rule | Flags |
@@ -25,20 +45,11 @@ Classes are read from `class` attributes (multi-line included), from the string 
 Alpine `:class` / `x-bind:class`, and from PHP variables or array keys whose name contains
 `class`. v4 syntax is understood: `bg-(--color)`, `p-4!`, `supports-(display:grid):grid`.
 
-## Determinism
-
-The result depends only on the project's files:
-
-- Tailwind itself decides what exists, through the site's installed `tailwindcss`, which must
-  match its `package-lock.json` (otherwise exit `1`).
-- Hyvä's generated files (`hyva-source.css`, `hyva-tokens.css`, `app/etc/hyva-themes.json`)
-  are rebuilt in memory from the modules' `view/<area>/tailwind` folders and
-  `hyva.config.json`, never read from disk: a stale build changes nothing.
-- A Hyvä site must be linted from the Magento root.
-
 ## Installation
 
-Distributed through Composer, with a prebuilt Node bundle: nothing to install with npm.
+A Composer package with a prebuilt Node bundle: nothing to install with npm. It is published
+on the agency Satis (`https://composer.tools.synocloud.com/`), which builds a version from each
+Git tag. Without access to it, declare the Git repository instead:
 
 ```json
 "repositories": [
@@ -51,12 +62,29 @@ composer require --dev blackbird/tailwind-lint
 ```
 
 Then create `dev/quality/tailwind-lint.config.json` (see [Configuration](#configuration)).
-Both scripts below read its path from `$TAILWIND_LINT_CONFIG`.
+
+## Usage
+
+```
+vendor/bin/tailwind-lint [--config tailwind-lint.config.json] [--all] <file>...
+```
+
+Run it from the project root: config paths are relative to it. `--all` checks every line, not
+only the lines added since `HEAD`.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | nothing to report |
+| `2` | violations on stdout, one per line: `file:line [rule] message` |
+| `1` | the linter could not run: message on stderr |
+
+The two scripts below read the config path from `$TAILWIND_LINT_CONFIG`, by default
+`dev/quality/tailwind-lint.config.json`.
 
 ### GrumPHP
 
-`bin/lint-staged.sh` lints the staged `*.phtml` / `*.css` files, calling `node` directly
-(GrumPHP runs in the PHP container under Warden).
+`bin/lint-staged.sh` lints the files it is given, or else the staged `*.phtml` / `*.css`
+files. It calls `node` directly: under Warden, GrumPHP runs in the PHP container.
 
 ```yaml
 grumphp:
@@ -69,37 +97,51 @@ grumphp:
                 task: shell
 ```
 
-## Usage
+### Claude Code
 
+`hooks/claude-post-tool-use.sh` lints each `*.phtml` / `*.css` file Claude edits and sends the
+violations back to it. It runs on the host, reaches `node` through
+`warden env exec -T php-fpm`, needs `jq`, and does nothing when the config file is absent. In
+the project's `.claude/settings.json`:
+
+```json
+"hooks": {
+    "PostToolUse": [
+        {
+            "matcher": "Edit|Write|MultiEdit",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "\"$CLAUDE_PROJECT_DIR\"/vendor/blackbird/tailwind-lint/hooks/claude-post-tool-use.sh",
+                    "timeout": 30
+                }
+            ]
+        }
+    ]
+}
 ```
-vendor/bin/tailwind-lint [--config tailwind-lint.config.json] [--all] <file>...
-```
-
-| Exit code | Meaning |
-|---|---|
-| `0` | nothing to report |
-| `2` | violations on stdout, one per line: `file:line [rule] message` |
-| `1` | the linter could not run: message on stderr |
-
-Only the lines added since `HEAD` are checked; a file git does not track counts as new, unless
-a `baselines` entry maps it to the file it was copied from. `--all` checks every line.
 
 ## Configuration
 
-Paths are relative to the directory the linter runs from.
+A Hyvä theme on Tailwind v4:
 
 ```json
 {
   "sites": [
-    { "name": "shop", "config": "themes/shop/web/tailwind/tailwind.config.js", "css": "themes/shop/web/tailwind/tailwind-source.css" }
+    {
+      "name": "shop",
+      "config": "app/design/frontend/Acme/hyva/web/tailwind/hyva.config.json",
+      "css": "app/design/frontend/Acme/hyva/web/tailwind/tailwind-source.css"
+    }
   ],
-  "include": ["**/*.phtml", "**/*.css"],
-  "ignore": ["vendor/**", "pub/**", "**/web/css/**"],
+  "include": ["app/design/frontend/*/hyva/**/*.phtml", "app/design/frontend/*/hyva/**/*.css"],
+  "ignore": ["**/web/css/**", "**/web/tailwind/generated/**"],
   "baselines": [
-    { "match": "^themes/shop/(.+\\.phtml)$", "original": "vendor/hyva-themes/magento2-default-theme/$1" }
+    { "match": "^app/design/frontend/Acme/hyva/(.+\\.phtml)$", "original": "vendor/hyva-themes/magento2-default-theme-csp/$1" }
   ],
   "rules": {
-    "no-hardcoded-color": { "hint": "use the colour aliases of the theme" },
+    "no-hardcoded-color": { "hint": "use a colour token of hyva.config.json" },
+    "no-unknown-class": { "cssFiles": ["vendor/acme/module/view/frontend/web/css/*.css"] },
     "enforces-shorthand": false
   }
 }
@@ -107,13 +149,22 @@ Paths are relative to the directory the linter runs from.
 
 | Key | Purpose |
 |---|---|
-| `sites` | One per Tailwind build. `config` is `tailwind.config.js` on v3, any file of the Tailwind folder on v4 (`hyva.config.json`). `css` is the entry stylesheet. A template belongs to the sites whose `content` (v3) or `@source` (v4) cover it; a stylesheet to the site of its folder. |
-| `include` / `ignore` | Files to check. `node_modules` is always ignored. |
-| `baselines` | Maps an override to its original, so copied code is not reported. |
-| `rules` | `false` disables a rule, `hint` appends advice to its message. An unknown rule is an error. |
+| `sites` | One per Tailwind build. `css` is the entry stylesheet. `config` is `tailwind.config.js` on v3, any file of the Tailwind folder on v4 (`hyva.config.json`). |
+| `include` / `ignore` | Globs of the files to check. `include` defaults to `**/*.{html,php,phtml,css}`; `node_modules` is always ignored. |
+| `baselines` | Maps an override to the file it was copied from, so that only the lines that differ are checked. Entries are tried in order, the first original that exists is used. |
+| `rules` | `false` disables a rule, `hint` appends advice to its message. An unknown rule or option is an error. |
 
-When a file belongs to several sites, a site-dependent violation is reported only if every
-site agrees.
+A template belongs to the sites whose `content` (v3) or `@source` (v4) globs cover it, a
+stylesheet to the site of its folder. When a file belongs to several sites, a site-dependent
+violation is reported only if every site agrees.
+
+### Classes from plain stylesheets: `cssFiles`
+
+A module may style its templates with a plain stylesheet loaded by its layout, outside the
+Tailwind build. List these stylesheets in the `cssFiles` option of `no-unknown-class`, as in
+eslint-plugin-tailwindcss: every class their selectors name is then known, without a variant
+(`uig-grid` is known, `md:uig-grid` is not). A glob that matches no file is an error. Keep the
+globs precise: the folder before the first wildcard is walked.
 
 ## Known limits
 
@@ -123,7 +174,6 @@ site agrees.
 - PHP and JS call arguments are not read as classes, except `escapeHtmlAttr(…)`; neither are
   literals compared with `==` / `!=` or used as keys (`'pending' =>`).
 - PHP variables are read only when their name contains `class`, and not when built with `.=`.
-- Hyvä modules are discovered from the filesystem, not from Magento's list of enabled modules.
 - A class declared only by an empty CSS rule is unknown: Tailwind drops empty rules.
 
 ## Development
@@ -134,4 +184,5 @@ npm test        # also installs the v4 fixture: needs network on the first run
 npm run build   # regenerates dist/, which Composer ships as is: commit it with the sources
 ```
 
-A test fails when `dist/` is out of date with `src/`.
+A test fails when `dist/` is out of date with `src/`. Tag each release (`v0.3.0`…): the Satis
+publishes tags only.

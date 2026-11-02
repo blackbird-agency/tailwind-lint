@@ -3159,898 +3159,6 @@ var require_token = __commonJS({
   }
 });
 
-// src/rules/no-unknown-class.js
-var require_no_unknown_class = __commonJS({
-  "src/rules/no-unknown-class.js"(exports2, module2) {
-    "use strict";
-    var { RUNTIME_PREFIXES } = require_utilities();
-    var { parseToken, bare } = require_token();
-    module2.exports = {
-      id: "no-unknown-class",
-      siteDependent: true,
-      // A class Tailwind does not generate is not a palette shade either (`--color-*: initial`).
-      supersedes: ["no-default-palette-shade"],
-      check({ groups, fragments = [] }, site) {
-        const violations = [];
-        const variable = site.version === 4 ? "bg-(--color)" : "bg-[--color]";
-        for (const token of groups.flat()) {
-          const { raw, core, variants } = token;
-          if (site.generates(raw) || !variants.length && site.declares(bare(token)) || site.markers.has(core) || /^(group|peer)\/[\w-]+$/.test(core)) continue;
-          violations.push({ token, message: `\`${raw}\` is neither a Tailwind class nor a class declared in the site CSS` });
-        }
-        for (const token of fragments) {
-          const { core } = parseToken(token.raw);
-          if (!RUNTIME_PREFIXES.some((prefix) => core.startsWith(`${prefix}-`))) continue;
-          violations.push({ token, message: `\`${token.raw}\` is built at runtime: Tailwind cannot generate it, use a CSS variable (\`${variable}\` + \`style="--color: \u2026"\`)` });
-        }
-        return violations;
-      }
-    };
-  }
-});
-
-// src/rules/no-removed-v3-class.js
-var require_no_removed_v3_class = __commonJS({
-  "src/rules/no-removed-v3-class.js"(exports2, module2) {
-    "use strict";
-    var { rebuild } = require_token();
-    var OPACITY = /^(bg|text|border|divide|ring|placeholder)-opacity(-.+)?$/;
-    var RENAMED = [
-      [/^flex-grow(-.+)?$/, (m) => `grow${m[1] ?? ""}`],
-      [/^flex-shrink(-.+)?$/, (m) => `shrink${m[1] ?? ""}`],
-      [/^overflow-ellipsis$/, () => "text-ellipsis"],
-      [/^decoration-slice$/, () => "box-decoration-slice"],
-      [/^decoration-clone$/, () => "box-decoration-clone"]
-    ];
-    module2.exports = {
-      id: "no-removed-v3-class",
-      siteDependent: true,
-      supersedes: ["no-unknown-class"],
-      check({ groups }, site) {
-        if (site.version !== 4) return [];
-        const violations = [];
-        for (const token of groups.flat()) {
-          const { raw, core } = token;
-          const variable = core.match(/^(.+?)-\[(--[\w-]+)\]$/);
-          if (variable) {
-            violations.push({ token, message: `\`${raw}\` is the v3 CSS variable shorthand, invalid in Tailwind v4: use \`${rebuild(token, `${variable[1]}-(${variable[2]})`)}\`` });
-            continue;
-          }
-          if (site.generates(raw)) continue;
-          if (OPACITY.test(core)) {
-            violations.push({ token, message: `\`${raw}\` was removed in Tailwind v4: use an opacity modifier (\`bg-black/50\`)` });
-            continue;
-          }
-          for (const [pattern, replace] of RENAMED) {
-            const match = core.match(pattern);
-            if (match) {
-              violations.push({ token, message: `\`${raw}\` was removed in Tailwind v4: use \`${rebuild(token, replace(match))}\`` });
-              break;
-            }
-          }
-        }
-        return violations;
-      }
-    };
-  }
-});
-
-// src/rules/no-hardcoded-color.js
-var require_no_hardcoded_color = __commonJS({
-  "src/rules/no-hardcoded-color.js"(exports2, module2) {
-    "use strict";
-    var { matchPrefix } = require_token();
-    var { COLOR_PREFIXES } = require_utilities();
-    var COLOR_VALUE = /^(#|rgba?\(|hsla?\()/i;
-    var COLOR_PROPERTIES = /(^|-)(color|fill|stroke)$|^background$/;
-    module2.exports = {
-      id: "no-hardcoded-color",
-      siteDependent: false,
-      check({ tokens }) {
-        return tokens.filter((token) => token.arbitrary && COLOR_VALUE.test(token.arbitrary) && (token.property ? COLOR_PROPERTIES.test(token.property) : matchPrefix(token.core, COLOR_PREFIXES))).map((token) => ({ token, message: `hardcoded colour in \`${token.raw}\`: use a theme colour alias` }));
-      }
-    };
-  }
-});
-
-// src/rules/no-default-palette-shade.js
-var require_no_default_palette_shade = __commonJS({
-  "src/rules/no-default-palette-shade.js"(exports2, module2) {
-    "use strict";
-    var { matchPrefix } = require_token();
-    var { COLOR_PREFIXES } = require_utilities();
-    module2.exports = {
-      id: "no-default-palette-shade",
-      siteDependent: true,
-      check({ tokens }, site) {
-        return tokens.filter((token) => !token.arbitrary).filter((token) => {
-          const match = matchPrefix(token.core, COLOR_PREFIXES);
-          return match && site.isDefaultShade(match.value);
-        }).map((token) => ({ token, message: `\`${token.raw}\` is a default Tailwind palette shade, not a theme colour: use a theme alias` }));
-      }
-    };
-  }
-});
-
-// src/rules/enforces-shorthand.js
-var require_enforces_shorthand = __commonJS({
-  "src/rules/enforces-shorthand.js"(exports2, module2) {
-    "use strict";
-    var { rebuild } = require_token();
-    var SHORTHANDS = [
-      [["pt", "pr", "pb", "pl"], "p"],
-      [["mt", "mr", "mb", "ml"], "m"],
-      [["top", "right", "bottom", "left"], "inset"],
-      [["border-t", "border-r", "border-b", "border-l"], "border"],
-      [["rounded-tl", "rounded-tr", "rounded-br", "rounded-bl"], "rounded"],
-      [["px", "py"], "p"],
-      [["mx", "my"], "m"],
-      [["inset-x", "inset-y"], "inset"],
-      [["border-x", "border-y"], "border"],
-      [["rounded-t", "rounded-b"], "rounded"],
-      [["rounded-l", "rounded-r"], "rounded"],
-      [["pl", "pr"], "px"],
-      [["pt", "pb"], "py"],
-      [["ml", "mr"], "mx"],
-      [["mt", "mb"], "my"],
-      [["left", "right"], "inset-x"],
-      [["top", "bottom"], "inset-y"],
-      [["border-l", "border-r"], "border-x"],
-      [["border-t", "border-b"], "border-y"],
-      [["rounded-tl", "rounded-tr"], "rounded-t"],
-      [["rounded-bl", "rounded-br"], "rounded-b"],
-      [["rounded-tl", "rounded-bl"], "rounded-l"],
-      [["rounded-tr", "rounded-br"], "rounded-r"],
-      [["w", "h"], "size"],
-      [["gap-x", "gap-y"], "gap"],
-      [["overflow-x", "overflow-y"], "overflow"],
-      [["overscroll-x", "overscroll-y"], "overscroll"],
-      [["scale-x", "scale-y"], "scale"],
-      [["translate-x", "translate-y"], "translate"]
-    ];
-    function valueOf(core, prefix) {
-      if (core === prefix) return "";
-      return core.startsWith(`${prefix}-`) ? core.slice(prefix.length + 1) : null;
-    }
-    function combinations(group) {
-      const found = [];
-      for (const [parts, shorthand] of SHORTHANDS) {
-        const sets = /* @__PURE__ */ new Map();
-        for (const token of group) {
-          for (const part of parts) {
-            const value = valueOf(token.core, part);
-            if (value === null) continue;
-            const key = [token.variants.join(":"), Boolean(token.important), token.negative, token.opacity, value].join("|");
-            if (!sets.has(key)) sets.set(key, { value, tokens: /* @__PURE__ */ new Map() });
-            if (!sets.get(key).tokens.has(part)) sets.get(key).tokens.set(part, token);
-          }
-        }
-        for (const { value, tokens } of sets.values()) {
-          if (tokens.size !== parts.length) continue;
-          const ordered = [...tokens.values()].sort((a, b) => group.indexOf(a) - group.indexOf(b));
-          found.push({ tokens: ordered, raw: rebuild(ordered[0], value ? `${shorthand}-${value}` : shorthand) });
-        }
-      }
-      return found;
-    }
-    module2.exports = {
-      id: "enforces-shorthand",
-      siteDependent: true,
-      candidates({ staticGroups = [] }) {
-        return staticGroups.flatMap((group) => combinations(group).map(({ raw }) => raw));
-      },
-      // Static groups only: tokens of a binding or a PHP expression may be alternatives that never meet.
-      check({ staticGroups = [] }, site) {
-        const violations = [];
-        for (const group of staticGroups) {
-          const used = /* @__PURE__ */ new Set();
-          for (const { tokens, raw } of combinations(group)) {
-            if (tokens.some((token) => used.has(token)) || !site.generates(raw)) continue;
-            tokens.forEach((token) => used.add(token));
-            violations.push({ token: tokens[0], message: `${tokens.map((token) => `\`${token.raw}\``).join(" + ")}: use \`${raw}\`` });
-          }
-        }
-        return violations;
-      }
-    };
-  }
-});
-
-// src/rules/unknown-scale-value.js
-var require_unknown_scale_value = __commonJS({
-  "src/rules/unknown-scale-value.js"(exports2, module2) {
-    "use strict";
-    var { matchPrefix } = require_token();
-    var { SCALES, SCALE_PREFIXES } = require_utilities();
-    module2.exports = {
-      id: "unknown-scale-value",
-      siteDependent: true,
-      supersedes: ["no-unknown-class"],
-      check({ tokens }, site) {
-        const violations = [];
-        for (const token of tokens) {
-          if (token.arbitrary || site.generates(token.raw)) continue;
-          const match = matchPrefix(token.core, SCALE_PREFIXES);
-          if (!match) continue;
-          const { key, named } = SCALES[match.prefix];
-          if (!named.test(match.value) || match.value in site.scale(key)) continue;
-          violations.push({
-            token,
-            message: `\`${token.raw}\` is not in the theme \`${key}\` scale: Tailwind does not generate it, use an existing key or an arbitrary value`
-          });
-        }
-        return violations;
-      }
-    };
-  }
-});
-
-// src/rules/no-arbitrary-on-scale.js
-var require_no_arbitrary_on_scale = __commonJS({
-  "src/rules/no-arbitrary-on-scale.js"(exports2, module2) {
-    "use strict";
-    var { matchPrefix, rebuild } = require_token();
-    var { SCALES, SCALE_PREFIXES } = require_utilities();
-    var toPixels = (value) => {
-      const match = String(value).match(/^(-?\d*\.?\d+)(px|rem)$/);
-      if (!match) return null;
-      return match[2] === "rem" ? Number(match[1]) * 16 : Number(match[1]);
-    };
-    module2.exports = {
-      id: "no-arbitrary-on-scale",
-      siteDependent: true,
-      check({ tokens }, site) {
-        const violations = [];
-        for (const token of tokens) {
-          if (!token.arbitrary || token.property) continue;
-          const pixels = toPixels(token.arbitrary);
-          const match = matchPrefix(token.core, SCALE_PREFIXES);
-          if (pixels === null || !match) continue;
-          const entry = Object.entries(site.scale(SCALES[match.prefix].key)).filter(([name, value]) => name !== "DEFAULT" && !(Array.isArray(value) && value.length > 1)).find(([, value]) => toPixels(Array.isArray(value) ? value[0] : value) === pixels);
-          if (!entry) continue;
-          const fixed = rebuild(token, `${match.prefix}-${entry[0]}`);
-          violations.push({ token, message: `\`${token.raw}\` matches a scale key: use \`${fixed}\`` });
-        }
-        return violations;
-      }
-    };
-  }
-});
-
-// src/rules/redundant-with-component.js
-var require_redundant_with_component = __commonJS({
-  "src/rules/redundant-with-component.js"(exports2, module2) {
-    "use strict";
-    module2.exports = {
-      id: "redundant-with-component",
-      siteDependent: true,
-      // Static groups only: tokens of a binding or a PHP expression may be alternatives that never meet.
-      check({ staticGroups = [] }, site) {
-        const violations = [];
-        for (const group of staticGroups) {
-          const components = group.filter((token) => !token.variants.length && site.closure(token.raw));
-          for (const token of group) {
-            const owner = components.find((component) => component.raw !== token.raw && site.closure(component.raw).has(token.raw));
-            if (owner) violations.push({ token, message: `\`${token.raw}\` is already applied by \`${owner.raw}\`` });
-          }
-        }
-        return violations;
-      }
-    };
-  }
-});
-
-// src/rules/no-conflicting-classes.js
-var require_no_conflicting_classes = __commonJS({
-  "src/rules/no-conflicting-classes.js"(exports2, module2) {
-    "use strict";
-    var { bare } = require_token();
-    module2.exports = {
-      id: "no-conflicting-classes",
-      siteDependent: true,
-      check({ staticGroups = [] }, site) {
-        const violations = [];
-        for (const group of staticGroups) {
-          const seen = /* @__PURE__ */ new Map();
-          for (const token of group) {
-            const declarations = site.signature(bare(token));
-            if (!declarations?.length) continue;
-            const properties = [...new Set(declarations.map(([property]) => property))].sort();
-            const value = declarations.map(([property, val]) => `${property}:${val}`).sort().join(";");
-            const key = [token.variants.join(":"), token.important, properties.join(",")].join("|");
-            const previous = seen.get(key);
-            if (!previous) {
-              seen.set(key, { token, value });
-              continue;
-            }
-            if (previous.value === value) continue;
-            const shown = properties.filter((property) => !property.startsWith("--"));
-            const list = (shown.length ? shown : properties).map((property) => `\`${property}\``).join(", ");
-            violations.push({ token, message: `\`${token.raw}\` conflicts with \`${previous.token.raw}\`: both set ${list}` });
-          }
-        }
-        return violations;
-      }
-    };
-  }
-});
-
-// src/rules/no-duplicate-classes.js
-var require_no_duplicate_classes = __commonJS({
-  "src/rules/no-duplicate-classes.js"(exports2, module2) {
-    "use strict";
-    var { rebuild } = require_token();
-    module2.exports = {
-      id: "no-duplicate-classes",
-      siteDependent: false,
-      check({ staticGroups = [] }) {
-        const violations = [];
-        for (const group of staticGroups) {
-          const seen = /* @__PURE__ */ new Set();
-          for (const token of group) {
-            const key = rebuild({ ...token, importantSuffix: false }, token.core);
-            if (seen.has(key)) {
-              violations.push({ token, message: `\`${token.raw}\` is duplicated` });
-              continue;
-            }
-            seen.add(key);
-          }
-        }
-        return violations;
-      }
-    };
-  }
-});
-
-// src/rules/index.js
-var require_rules = __commonJS({
-  "src/rules/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = [
-      require_no_unknown_class(),
-      require_no_removed_v3_class(),
-      require_no_hardcoded_color(),
-      require_no_default_palette_shade(),
-      require_enforces_shorthand(),
-      require_unknown_scale_value(),
-      require_no_arbitrary_on_scale(),
-      require_redundant_with_component(),
-      require_no_conflicting_classes(),
-      require_no_duplicate_classes()
-    ];
-  }
-});
-
-// src/config.js
-var require_config = __commonJS({
-  "src/config.js"(exports2, module2) {
-    "use strict";
-    var fs = require("fs");
-    var path = require("path");
-    var micromatch = require_micromatch();
-    var RULES = require_rules();
-    var DEFAULT_IGNORE = ["**/node_modules/**"];
-    function globToRegExp(glob) {
-      return micromatch.makeRe(glob, { dot: true });
-    }
-    function normalizeConfig(raw, base) {
-      if (!Array.isArray(raw.sites)) throw new Error('tailwind-lint config: "sites" must be an array');
-      const sites = raw.sites.map((site, index) => {
-        if (!site.config || !site.css) throw new Error(`tailwind-lint config: site #${index + 1} needs "config" and "css"`);
-        return {
-          name: site.name ?? `site-${index + 1}`,
-          config: path.resolve(base, site.config),
-          css: path.resolve(base, site.css)
-        };
-      });
-      const ids = new Set(RULES.map((rule) => rule.id));
-      for (const [id, options] of Object.entries(raw.rules ?? {})) {
-        if (!ids.has(id)) throw new Error(`tailwind-lint config: unknown rule "${id}"`);
-        if (options !== false && (typeof options !== "object" || options === null || options.hint !== void 0 && typeof options.hint !== "string")) {
-          throw new Error(`tailwind-lint config: rule "${id}" takes false or { "hint": "\u2026" }`);
-        }
-      }
-      return {
-        root: base,
-        sites,
-        include: (raw.include ?? ["**/*.html", "**/*.php", "**/*.phtml", "**/*.css"]).map(globToRegExp),
-        ignore: [...DEFAULT_IGNORE, ...raw.ignore ?? []].map(globToRegExp),
-        baselines: (raw.baselines ?? []).map((baseline) => ({ match: new RegExp(baseline.match), original: baseline.original })),
-        rules: raw.rules ?? {}
-      };
-    }
-    function loadConfig2(file) {
-      const absolute = path.resolve(file);
-      if (!fs.existsSync(absolute)) throw new Error(`tailwind-lint: config file ${file} not found`);
-      return normalizeConfig(JSON.parse(fs.readFileSync(absolute, "utf8")), process.cwd());
-    }
-    module2.exports = { globToRegExp, normalizeConfig, loadConfig: loadConfig2 };
-  }
-});
-
-// src/lockfile.js
-var require_lockfile = __commonJS({
-  "src/lockfile.js"(exports2, module2) {
-    "use strict";
-    var fs = require("fs");
-    var path = require("path");
-    function packageRoot(req, name) {
-      let entry;
-      try {
-        entry = req.resolve(name);
-      } catch (error) {
-        if (error.code === "MODULE_NOT_FOUND") return null;
-        throw error;
-      }
-      let dir = path.dirname(entry);
-      for (; ; ) {
-        const file = path.join(dir, "package.json");
-        if (fs.existsSync(file)) {
-          try {
-            const json = JSON.parse(fs.readFileSync(file, "utf8"));
-            if (json.name === name) return { dir, version: json.version };
-          } catch {
-          }
-        }
-        const parent = path.dirname(dir);
-        if (parent === dir) return null;
-        dir = parent;
-      }
-    }
-    function projectDirOf(packageDir) {
-      const outer = packageDir.indexOf(`${path.sep}node_modules${path.sep}`);
-      return outer === -1 ? path.dirname(packageDir) : packageDir.slice(0, outer);
-    }
-    function readLock(lockFile) {
-      if (!fs.existsSync(lockFile)) return null;
-      try {
-        return JSON.parse(fs.readFileSync(lockFile, "utf8"));
-      } catch (error) {
-        throw new Error(`tailwind-lint: cannot parse ${lockFile}: ${error.message}`);
-      }
-    }
-    function assertLocked(req, names) {
-      const locks = /* @__PURE__ */ new Map();
-      for (const name of names) {
-        const pkg = packageRoot(req, name);
-        if (!pkg) throw new Error(`tailwind-lint: ${name} is not installed for ${path.dirname((req.resolve.paths(name) || ["."])[0])}`);
-        const projectDir = projectDirOf(pkg.dir);
-        if (!locks.has(projectDir)) {
-          const lockFile = path.join(projectDir, "package-lock.json");
-          locks.set(projectDir, readLock(lockFile));
-        }
-        const lock = locks.get(projectDir);
-        if (!lock) throw new Error(`tailwind-lint: no package-lock.json in ${projectDir}, required to pin ${name}`);
-        const key = path.relative(projectDir, pkg.dir).split(path.sep).join("/");
-        const locked = lock.packages?.[key]?.version;
-        if (locked !== pkg.version) {
-          throw new Error(`tailwind-lint: ${name} ${pkg.version} is installed in ${projectDir} but its package-lock.json pins ${locked ?? "nothing"}`);
-        }
-      }
-    }
-    module2.exports = { assertLocked };
-  }
-});
-
-// src/hyva.js
-var require_hyva = __commonJS({
-  "src/hyva.js"(exports2, module2) {
-    "use strict";
-    var fs = require("fs");
-    var path = require("path");
-    var { pathToFileURL } = require("url");
-    var MAX_DEPTH = 7;
-    function realpath(file) {
-      try {
-        return fs.realpathSync(file);
-      } catch {
-        return file;
-      }
-    }
-    function assertMagentoRoot(configFile, root) {
-      let basePath = null;
-      for (let dir = realpath(path.dirname(configFile)); ; dir = path.dirname(dir)) {
-        if (fs.existsSync(path.join(dir, "app")) && fs.existsSync(path.join(dir, "vendor"))) {
-          basePath = dir;
-          break;
-        }
-        if (path.dirname(dir) === dir) break;
-      }
-      if (basePath !== root && basePath !== realpath(root)) {
-        throw new Error(`tailwind-lint: ${configFile} resolves the Magento root to ${basePath}, but tailwind-lint runs with root ${root}`);
-      }
-      return basePath;
-    }
-    function readHyvaConfig(themeDir) {
-      const file = path.join(themeDir, "hyva.config.json");
-      if (!fs.existsSync(file)) return null;
-      try {
-        return JSON.parse(fs.readFileSync(file, "utf8"));
-      } catch (error) {
-        throw new Error(`tailwind-lint: cannot parse ${file}: ${error.message}`);
-      }
-    }
-    function isHyvaTheme(themeDir, sourceText) {
-      return fs.existsSync(path.join(themeDir, "hyva.config.json")) || String(sourceText ?? "").includes("@hyva-themes/hyva-modules");
-    }
-    function isDir(file) {
-      try {
-        return fs.statSync(file).isDirectory();
-      } catch {
-        return false;
-      }
-    }
-    function discover(root, area) {
-      const found = [];
-      const walk = (dir, depth) => {
-        if (isDir(path.join(dir, "view", area, "tailwind"))) {
-          found.push(path.relative(root, dir).split(path.sep).join("/"));
-        }
-        if (depth >= MAX_DEPTH || fs.existsSync(path.join(dir, "registration.php"))) return;
-        let entries;
-        try {
-          entries = fs.readdirSync(dir);
-        } catch {
-          return;
-        }
-        for (const name of entries) {
-          if (name === "node_modules" || name === "view" || name.startsWith(".")) continue;
-          const child = path.join(dir, name);
-          if (isDir(child)) walk(child, depth + 1);
-        }
-      };
-      for (const base of ["app/code", "vendor"]) {
-        const dir = path.join(root, base);
-        if (isDir(dir)) walk(dir, 1);
-      }
-      return found.sort();
-    }
-    var discovered = /* @__PURE__ */ new Map();
-    function discoverOnce(root, area) {
-      const key = `${root}\0${area}`;
-      if (!discovered.has(key)) discovered.set(key, discover(root, area));
-      return discovered.get(key);
-    }
-    function hyvaModules(root, hyvaConfig) {
-      const tailwind = hyvaConfig && hyvaConfig.tailwind || {};
-      const area = tailwind.area ?? "frontend";
-      const exclude = tailwind.exclude || [];
-      const discovered2 = tailwind.includeExternalModules === false ? [] : discoverOnce(root, area).map((src) => {
-        const entry = exclude.find((e) => e.src === src);
-        if (!entry) return { src, cssExcluded: false };
-        return entry.keepSource ? { src, cssExcluded: true } : null;
-      }).filter(Boolean);
-      const included = (tailwind.include || []).map((m) => ({ src: m.src, cssExcluded: Boolean(m.cssExcluded) }));
-      return [...discovered2, ...included];
-    }
-    function classify(root, modules, area) {
-      const sources = [], sourceCss = [], moduleCss = [];
-      for (const m of modules) {
-        if (!m.src) continue;
-        const dir = path.resolve(root, m.src);
-        const tw = path.join(dir, "view", area, "tailwind");
-        if (m.cssExcluded) sources.push(dir);
-        else if (fs.existsSync(path.join(tw, "module.css"))) moduleCss.push(path.join(tw, "module.css"));
-        else {
-          sources.push(dir);
-          if (fs.existsSync(path.join(tw, "tailwind-source.css"))) sourceCss.push(path.join(tw, "tailwind-source.css"));
-        }
-      }
-      return { sources, sourceCss, moduleCss };
-    }
-    function hyvaSourceCss(root, modules, area) {
-      const { sources, sourceCss, moduleCss } = classify(root, modules, area);
-      const lines = (list, fmt) => list.map(fmt).join("");
-      return `${lines(sources, (d) => `@source "${d}";
-`)}
-${lines(sourceCss, (f) => `@import "${f}";
-`)}
-${lines(moduleCss, (f) => `@import "${f}";
-`)}
-`;
-    }
-    function hyvaModuleCssFiles(root, modules, area) {
-      const { sourceCss, moduleCss } = classify(root, modules, area);
-      return [...sourceCss, ...moduleCss];
-    }
-    function packageDir(startDir, name) {
-      let dir = startDir;
-      for (; ; ) {
-        const candidate = path.join(dir, "node_modules", ...name.split("/"));
-        if (fs.existsSync(path.join(candidate, "package.json"))) return candidate;
-        const parent = path.dirname(dir);
-        if (parent === dir) return null;
-        dir = parent;
-      }
-    }
-    function hyvaPackageDir(req) {
-      let dir = path.dirname(req.resolve("@hyva-themes/hyva-modules"));
-      for (; ; ) {
-        const file = path.join(dir, "package.json");
-        if (fs.existsSync(file) && JSON.parse(fs.readFileSync(file, "utf8")).name === "@hyva-themes/hyva-modules") return dir;
-        const parent = path.dirname(dir);
-        if (parent === dir) throw new Error("tailwind-lint: cannot locate @hyva-themes/hyva-modules");
-        dir = parent;
-      }
-    }
-    async function hyvaTokensCss(themeDir, hyvaConfig, req) {
-      const tokens = hyvaConfig && hyvaConfig.tokens || {};
-      const { src } = tokens;
-      if (src && (src.startsWith("http") || !src.trim().toLowerCase().endsWith(".json"))) {
-        throw new Error(`tailwind-lint: design tokens src must be a local JSON file: ${src}`);
-      }
-      let design = tokens.values;
-      if (!design) {
-        const file = path.resolve(themeDir, src || "design.tokens.json");
-        if (!fs.existsSync(file)) {
-          if (src) throw new Error(`tailwind-lint: design tokens file not found: ${file}`);
-          return null;
-        }
-        try {
-          design = JSON.parse(fs.readFileSync(file, "utf8"));
-        } catch (error) {
-          throw new Error(`tailwind-lint: cannot parse ${file}: ${error.message}`);
-        }
-      }
-      if (typeof design !== "object") throw new Error("tailwind-lint: invalid design tokens (expected a JSON object)");
-      const hyvaDir = hyvaPackageDir(req);
-      const fylgja = packageDir(hyvaDir, "@fylgja/props-builder");
-      if (!fylgja) throw new Error("tailwind-lint: @fylgja/props-builder not found next to @hyva-themes/hyva-modules");
-      const load = async (name) => (await import(pathToFileURL(path.join(fylgja, "src", name)).href)).default;
-      const fromTokens = await load("from-tokens.js");
-      const toStyle = await load("to-style.js");
-      const style = toStyle(fromTokens(design, tokens.format || "default"), {
-        selector: tokens.cssSelector || "@theme",
-        mediaDark: tokens.mediaDark || "@media (prefers-color-scheme: dark)"
-      });
-      return `${style}
-`;
-    }
-    module2.exports = { realpath, assertMagentoRoot, readHyvaConfig, isHyvaTheme, hyvaModules, hyvaSourceCss, hyvaModuleCssFiles, hyvaTokensCss };
-  }
-});
-
-// src/adapters/tailwind-v3.js
-var require_tailwind_v3 = __commonJS({
-  "src/adapters/tailwind-v3.js"(exports2, module2) {
-    "use strict";
-    var fs = require("fs");
-    var path = require("path");
-    var { assertLocked } = require_lockfile();
-    var { readHyvaConfig, isHyvaTheme, hyvaModules, hyvaModuleCssFiles, assertMagentoRoot, realpath } = require_hyva();
-    var COLOR_THEME_KEYS = [
-      "colors",
-      "textColor",
-      "backgroundColor",
-      "borderColor",
-      "ringColor",
-      "ringOffsetColor",
-      "outlineColor",
-      "fill",
-      "stroke",
-      "divideColor",
-      "placeholderColor",
-      "accentColor",
-      "caretColor",
-      "textDecorationColor",
-      "boxShadowColor",
-      "gradientColorStops"
-    ];
-    function flattenKeys(object, prefix, out) {
-      if (!object || typeof object !== "object") return out;
-      for (const [key, value] of Object.entries(object)) {
-        const name = key === "DEFAULT" ? prefix : [prefix, key].filter(Boolean).join("-");
-        if (value && typeof value === "object" && !Array.isArray(value)) flattenKeys(value, name, out);
-        else out.add(name);
-      }
-      return out;
-    }
-    function collectImports(file, seen = /* @__PURE__ */ new Set()) {
-      if (seen.has(file) || !fs.existsSync(file)) return seen;
-      seen.add(file);
-      const css = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-      for (const match of css.matchAll(/@import\s+(?:url\()?\s*["']?([^"')\s;]+)["']?\s*\)?/g)) {
-        const specifier = match[1];
-        const target = path.resolve(path.dirname(file), specifier);
-        if (/^(?:[a-z]+:)?\/\//i.test(specifier) || target.includes(`${path.sep}node_modules${path.sep}`)) continue;
-        if (target.endsWith(".css") && fs.statSync(target, { throwIfNoEntry: false })?.isFile()) collectImports(target, seen);
-        else if (/^\.{0,2}\//.test(specifier) || specifier.endsWith(".css") || /[*?{]/.test(specifier) || fs.existsSync(target)) {
-          throw new Error(`tailwind-lint: ${file} imports ${specifier}, which tailwind-lint cannot resolve`);
-        }
-      }
-      return seen;
-    }
-    function buildComponentIndex(entry, postcss, nesting) {
-      const direct = /* @__PURE__ */ new Map();
-      for (const file of collectImports(entry)) {
-        const root = parse(postcss, [nesting], file);
-        root.walkAtRules("apply", (rule) => {
-          if (rule.parent?.type !== "rule") return;
-          for (let node = rule.parent.parent; node; node = node.parent) {
-            if (node.type === "atrule" && node.name !== "layer") return;
-          }
-          const tokens = rule.params.replace(/!important/g, "").split(/\s+/).filter(Boolean);
-          for (const selector of rule.parent.selectors) {
-            const match = selector.trim().match(/^\.([\w-]+)$/);
-            if (!match) continue;
-            if (!direct.has(match[1])) direct.set(match[1], /* @__PURE__ */ new Set());
-            tokens.forEach((token) => direct.get(match[1]).add(token));
-          }
-        });
-      }
-      const closed = /* @__PURE__ */ new Map();
-      const close = (name, stack) => {
-        if (closed.has(name)) return closed.get(name);
-        const out = /* @__PURE__ */ new Set();
-        stack.add(name);
-        for (const token of direct.get(name) ?? []) {
-          out.add(token);
-          if (!direct.has(token) || stack.has(token)) continue;
-          close(token, stack).forEach((applied) => {
-            if (direct.has(applied)) out.add(applied);
-          });
-        }
-        stack.delete(name);
-        closed.set(name, out);
-        return out;
-      };
-      for (const name of direct.keys()) close(name, /* @__PURE__ */ new Set());
-      return closed;
-    }
-    function parse(postcss, plugins, file) {
-      try {
-        return postcss(plugins).process(fs.readFileSync(file, "utf8"), { from: file }).root;
-      } catch (error) {
-        throw new Error(`tailwind-lint: cannot parse ${file}: ${error.reason ?? error.message}`);
-      }
-    }
-    function declaredClasses(files, postcss, nesting) {
-      const names = /* @__PURE__ */ new Set();
-      for (const file of files) {
-        parse(postcss, [nesting], file).walkRules((rule) => {
-          for (const match of rule.selector.matchAll(/\.((?:\\.|[\w-])+)/g)) names.add(match[1].replace(/\\(.)/g, "$1"));
-        });
-      }
-      return names;
-    }
-    function layerRoot(files, postcss, nesting) {
-      const root = postcss.root();
-      for (const file of files) {
-        parse(postcss, [nesting], file).walkAtRules(/^(layer|responsive|variants)$/, (rule) => {
-          if (rule.name === "layer" ? !["components", "utilities"].includes(rule.params) : rule.parent.type !== "root") return;
-          root.append(postcss.atRule({ name: "layer", params: rule.name === "layer" ? rule.params : "utilities", nodes: rule.nodes.map((node) => node.clone()) }));
-        });
-      }
-      return root;
-    }
-    function muteTailwindLog(req) {
-      const log = req("tailwindcss/lib/util/log").default;
-      Object.keys(log).forEach((key) => {
-        log[key] = () => {
-        };
-      });
-    }
-    function markers(resolved) {
-      const found = /* @__PURE__ */ new Set(["group", "peer"]);
-      const [mode] = [].concat(resolved.darkMode ?? []);
-      if (mode === "class" || mode === "selector") found.add("dark");
-      return found;
-    }
-    function withHyvaEnvironment(req, configFile, root, modules, area, load) {
-      const themeDir = path.dirname(configFile);
-      const basePath = assertMagentoRoot(configFile, root);
-      const hyvaDir = path.dirname(req.resolve("@hyva-themes/hyva-modules/package.json"));
-      const stale = new Set(modules.map(({ src }) => path.join(basePath, src, "view", area, "tailwind/tailwind.config.js")));
-      for (const key of Object.keys(req.cache)) {
-        if (key.startsWith(hyvaDir + path.sep) || key.startsWith(realpath(hyvaDir) + path.sep) || stale.has(key)) delete req.cache[key];
-      }
-      const themesJson = path.join(basePath, "app/etc/hyva-themes.json");
-      const content = JSON.stringify({ extensions: modules.filter((m) => !m.cssExcluded).map(({ src }) => ({ src })) });
-      const cwd = process.cwd();
-      const { readFileSync } = fs;
-      fs.readFileSync = function(file, ...rest) {
-        if (typeof file === "string" && path.resolve(file) === themesJson) return content;
-        return readFileSync.call(this, file, ...rest);
-      };
-      try {
-        process.chdir(themeDir);
-        return load();
-      } finally {
-        fs.readFileSync = readFileSync;
-        process.chdir(cwd);
-      }
-    }
-    function loadSite({ name, config: configFile, css }, req, root) {
-      const configDir = path.dirname(configFile);
-      const hyvaTheme = isHyvaTheme(configDir, fs.readFileSync(configFile, "utf8"));
-      assertLocked(req, ["tailwindcss", "postcss", "micromatch", ...hyvaTheme ? ["@hyva-themes/hyva-modules"] : []]);
-      if (hyvaTheme && !root) throw new Error(`tailwind-lint: site ${name} is a Hyv\xE4 theme, the Magento root is required`);
-      const hyvaConfig = hyvaTheme ? readHyvaConfig(configDir) : null;
-      const area = hyvaConfig?.tailwind?.area ?? "frontend";
-      const modules = hyvaTheme ? hyvaModules(root, hyvaConfig) : [];
-      const config = hyvaTheme ? withHyvaEnvironment(req, configFile, root, modules, area, () => {
-        delete req.cache[configFile];
-        return req(configFile);
-      }) : req(configFile);
-      muteTailwindLog(req);
-      const resolved = req("tailwindcss/resolveConfig")(config);
-      const defaultColors = req("tailwindcss/colors");
-      const micromatch = req("micromatch");
-      const postcss = req("postcss");
-      const cssDir = path.dirname(css);
-      const themeColorNames = /* @__PURE__ */ new Set();
-      COLOR_THEME_KEYS.forEach((key) => flattenKeys(config.theme?.extend?.[key], "", themeColorNames));
-      const globs = { include: [], ignore: [] };
-      for (const entry of resolved.content.files.filter((file) => typeof file === "string")) {
-        const glob = entry.replace(/^!/, "");
-        globs[entry.startsWith("!") ? "ignore" : "include"].push(path.isAbsolute(glob) ? glob : path.resolve(configDir, glob));
-      }
-      const nesting = req("tailwindcss/nesting");
-      const components = buildComponentIndex(css, postcss, nesting);
-      const signatures = /* @__PURE__ */ new Map();
-      const generated = /* @__PURE__ */ new Map();
-      let declared = null;
-      let context = null;
-      const generate = (candidate) => {
-        context ??= req("tailwindcss/lib/lib/setupContextUtils").createContext(resolved, [], layerRoot(cssFiles(), postcss, nesting));
-        return req("tailwindcss/lib/lib/generateRules").generateRules(/* @__PURE__ */ new Set([candidate]), context);
-      };
-      const cssFiles = () => [
-        ...collectImports(css),
-        ...hyvaTheme ? hyvaModuleCssFiles(root, modules, area) : []
-      ].sort();
-      return {
-        name,
-        version: 3,
-        markers: markers(resolved),
-        postcss,
-        covers(absFile) {
-          if (absFile.endsWith(".css")) return absFile.startsWith(cssDir + path.sep);
-          return micromatch.isMatch(absFile, globs.include, { ignore: globs.ignore });
-        },
-        isDefaultShade(color) {
-          const match = color.match(/^([a-z]+)-(\d+)$/);
-          if (!match || themeColorNames.has(color)) return false;
-          const fallback = defaultColors[match[1]]?.[match[2]];
-          return fallback !== void 0 && resolved.theme.colors[match[1]]?.[match[2]] === fallback;
-        },
-        scale(key) {
-          return resolved.theme[key] ?? {};
-        },
-        closure(className) {
-          return components.get(className) ?? null;
-        },
-        async loadSignatures(classNames) {
-          for (const className of classNames) {
-            if (signatures.has(className)) continue;
-            const rules = generate(className).filter(([meta, rule]) => meta.layer === "utilities" && rule.type === "rule");
-            const declarations = rules.flatMap(([, rule]) => rule.nodes.filter((node) => node.type === "decl").map((node) => [node.prop, node.value]));
-            signatures.set(className, rules.length ? declarations : null);
-          }
-        },
-        signature(className) {
-          return signatures.get(className) ?? null;
-        },
-        async loadClasses(raws) {
-          declared ??= declaredClasses(cssFiles(), postcss, nesting);
-          for (const raw of raws) {
-            if (!generated.has(raw)) generated.set(raw, generate(raw).length > 0);
-          }
-        },
-        generates(raw) {
-          if (!generated.has(raw)) throw new Error(`tailwind-lint: generates(${raw}) called before loadClasses`);
-          return generated.get(raw);
-        },
-        declares(className) {
-          if (!declared) throw new Error("tailwind-lint: declares() called before loadClasses");
-          return declared.has(className);
-        }
-      };
-    }
-    module2.exports = { loadSite };
-  }
-});
-
 // node_modules/picocolors/picocolors.js
 var require_picocolors = __commonJS({
   "node_modules/picocolors/picocolors.js"(exports2, module2) {
@@ -10265,6 +9373,801 @@ var require_postcss = __commonJS({
   }
 });
 
+// src/css-files.js
+var require_css_files = __commonJS({
+  "src/css-files.js"(exports2, module2) {
+    "use strict";
+    var fs = require("fs");
+    var path = require("path");
+    var micromatch = require_micromatch();
+    var postcss = require_postcss();
+    var CLASS = /\.((?:\\.|[\w-])+)/g;
+    var cache = /* @__PURE__ */ new Map();
+    function walk(dir, files) {
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(file, files);
+        else files.push(file);
+      }
+    }
+    function expand(pattern) {
+      const { base, isGlob } = micromatch.scan(pattern);
+      if (!isGlob) return fs.existsSync(pattern) ? [pattern] : [];
+      const files = [];
+      walk(base, files);
+      return files.filter((file) => micromatch.isMatch(file, pattern));
+    }
+    function classesOf(file, classes) {
+      let root;
+      try {
+        root = postcss.parse(fs.readFileSync(file, "utf8"), { from: file });
+      } catch (error) {
+        throw new Error(`tailwind-lint: cannot parse ${file}: ${error.reason ?? error.message}`);
+      }
+      root.walkRules((rule) => {
+        if (rule.parent?.type === "atrule" && /keyframes$/.test(rule.parent.name)) return;
+        for (const match of rule.selector.replace(/\[[^\]]*\]/g, "").matchAll(CLASS)) classes.add(match[1].replace(/\\(.)/g, "$1"));
+      });
+    }
+    function cssFileClasses(patterns = []) {
+      const key = patterns.join("\0");
+      if (!cache.has(key)) {
+        const classes = /* @__PURE__ */ new Set();
+        for (const pattern of patterns) {
+          const files = expand(pattern);
+          if (!files.length) throw new Error(`tailwind-lint: cssFiles ${pattern} matches no file`);
+          files.forEach((file) => classesOf(file, classes));
+        }
+        cache.set(key, classes);
+      }
+      return cache.get(key);
+    }
+    module2.exports = { cssFileClasses };
+  }
+});
+
+// src/rules/no-unknown-class.js
+var require_no_unknown_class = __commonJS({
+  "src/rules/no-unknown-class.js"(exports2, module2) {
+    "use strict";
+    var path = require("path");
+    var { RUNTIME_PREFIXES } = require_utilities();
+    var { parseToken, bare } = require_token();
+    var { cssFileClasses } = require_css_files();
+    module2.exports = {
+      id: "no-unknown-class",
+      siteDependent: true,
+      // A class Tailwind does not generate is not a palette shade either (`--color-*: initial`).
+      supersedes: ["no-default-palette-shade"],
+      options: {
+        cssFiles: {
+          valid: (value) => Array.isArray(value) && value.every((pattern) => typeof pattern === "string"),
+          resolve: (value, base) => value.map((pattern) => path.resolve(base, pattern))
+        }
+      },
+      check({ groups, fragments = [] }, site, { cssFiles } = {}) {
+        const violations = [];
+        const variable = site.version === 4 ? "bg-(--color)" : "bg-[--color]";
+        const external = cssFileClasses(cssFiles);
+        const declared = (token) => site.declares(bare(token)) || external.has(bare(token));
+        for (const token of groups.flat()) {
+          const { raw, core, variants } = token;
+          if (site.generates(raw) || !variants.length && declared(token) || site.markers.has(core) || /^(group|peer)\/[\w-]+$/.test(core)) continue;
+          violations.push({ token, message: `\`${raw}\` is neither a Tailwind class nor a class declared in the site CSS` });
+        }
+        for (const token of fragments) {
+          const { core } = parseToken(token.raw);
+          if (!RUNTIME_PREFIXES.some((prefix) => core.startsWith(`${prefix}-`))) continue;
+          violations.push({ token, message: `\`${token.raw}\` is built at runtime: Tailwind cannot generate it, use a CSS variable (\`${variable}\` + \`style="--color: \u2026"\`)` });
+        }
+        return violations;
+      }
+    };
+  }
+});
+
+// src/rules/no-removed-v3-class.js
+var require_no_removed_v3_class = __commonJS({
+  "src/rules/no-removed-v3-class.js"(exports2, module2) {
+    "use strict";
+    var { rebuild } = require_token();
+    var OPACITY = /^(bg|text|border|divide|ring|placeholder)-opacity(-.+)?$/;
+    var RENAMED = [
+      [/^flex-grow(-.+)?$/, (m) => `grow${m[1] ?? ""}`],
+      [/^flex-shrink(-.+)?$/, (m) => `shrink${m[1] ?? ""}`],
+      [/^overflow-ellipsis$/, () => "text-ellipsis"],
+      [/^decoration-slice$/, () => "box-decoration-slice"],
+      [/^decoration-clone$/, () => "box-decoration-clone"]
+    ];
+    module2.exports = {
+      id: "no-removed-v3-class",
+      siteDependent: true,
+      supersedes: ["no-unknown-class"],
+      check({ groups }, site) {
+        if (site.version !== 4) return [];
+        const violations = [];
+        for (const token of groups.flat()) {
+          const { raw, core } = token;
+          const variable = core.match(/^(.+?)-\[(--[\w-]+)\]$/);
+          if (variable) {
+            violations.push({ token, message: `\`${raw}\` is the v3 CSS variable shorthand, invalid in Tailwind v4: use \`${rebuild(token, `${variable[1]}-(${variable[2]})`)}\`` });
+            continue;
+          }
+          if (site.generates(raw)) continue;
+          if (OPACITY.test(core)) {
+            violations.push({ token, message: `\`${raw}\` was removed in Tailwind v4: use an opacity modifier (\`bg-black/50\`)` });
+            continue;
+          }
+          for (const [pattern, replace] of RENAMED) {
+            const match = core.match(pattern);
+            if (match) {
+              violations.push({ token, message: `\`${raw}\` was removed in Tailwind v4: use \`${rebuild(token, replace(match))}\`` });
+              break;
+            }
+          }
+        }
+        return violations;
+      }
+    };
+  }
+});
+
+// src/rules/no-hardcoded-color.js
+var require_no_hardcoded_color = __commonJS({
+  "src/rules/no-hardcoded-color.js"(exports2, module2) {
+    "use strict";
+    var { matchPrefix } = require_token();
+    var { COLOR_PREFIXES } = require_utilities();
+    var COLOR_VALUE = /^(#|rgba?\(|hsla?\()/i;
+    var COLOR_PROPERTIES = /(^|-)(color|fill|stroke)$|^background$/;
+    module2.exports = {
+      id: "no-hardcoded-color",
+      siteDependent: false,
+      check({ tokens }) {
+        return tokens.filter((token) => token.arbitrary && COLOR_VALUE.test(token.arbitrary) && (token.property ? COLOR_PROPERTIES.test(token.property) : matchPrefix(token.core, COLOR_PREFIXES))).map((token) => ({ token, message: `hardcoded colour in \`${token.raw}\`: use a theme colour alias` }));
+      }
+    };
+  }
+});
+
+// src/rules/no-default-palette-shade.js
+var require_no_default_palette_shade = __commonJS({
+  "src/rules/no-default-palette-shade.js"(exports2, module2) {
+    "use strict";
+    var { matchPrefix } = require_token();
+    var { COLOR_PREFIXES } = require_utilities();
+    module2.exports = {
+      id: "no-default-palette-shade",
+      siteDependent: true,
+      check({ tokens }, site) {
+        return tokens.filter((token) => !token.arbitrary).filter((token) => {
+          const match = matchPrefix(token.core, COLOR_PREFIXES);
+          return match && site.isDefaultShade(match.value);
+        }).map((token) => ({ token, message: `\`${token.raw}\` is a default Tailwind palette shade, not a theme colour: use a theme alias` }));
+      }
+    };
+  }
+});
+
+// src/rules/enforces-shorthand.js
+var require_enforces_shorthand = __commonJS({
+  "src/rules/enforces-shorthand.js"(exports2, module2) {
+    "use strict";
+    var { rebuild } = require_token();
+    var SHORTHANDS = [
+      [["pt", "pr", "pb", "pl"], "p"],
+      [["mt", "mr", "mb", "ml"], "m"],
+      [["top", "right", "bottom", "left"], "inset"],
+      [["border-t", "border-r", "border-b", "border-l"], "border"],
+      [["rounded-tl", "rounded-tr", "rounded-br", "rounded-bl"], "rounded"],
+      [["px", "py"], "p"],
+      [["mx", "my"], "m"],
+      [["inset-x", "inset-y"], "inset"],
+      [["border-x", "border-y"], "border"],
+      [["rounded-t", "rounded-b"], "rounded"],
+      [["rounded-l", "rounded-r"], "rounded"],
+      [["pl", "pr"], "px"],
+      [["pt", "pb"], "py"],
+      [["ml", "mr"], "mx"],
+      [["mt", "mb"], "my"],
+      [["left", "right"], "inset-x"],
+      [["top", "bottom"], "inset-y"],
+      [["border-l", "border-r"], "border-x"],
+      [["border-t", "border-b"], "border-y"],
+      [["rounded-tl", "rounded-tr"], "rounded-t"],
+      [["rounded-bl", "rounded-br"], "rounded-b"],
+      [["rounded-tl", "rounded-bl"], "rounded-l"],
+      [["rounded-tr", "rounded-br"], "rounded-r"],
+      [["w", "h"], "size"],
+      [["gap-x", "gap-y"], "gap"],
+      [["overflow-x", "overflow-y"], "overflow"],
+      [["overscroll-x", "overscroll-y"], "overscroll"],
+      [["scale-x", "scale-y"], "scale"],
+      [["translate-x", "translate-y"], "translate"]
+    ];
+    function valueOf(core, prefix) {
+      if (core === prefix) return "";
+      return core.startsWith(`${prefix}-`) ? core.slice(prefix.length + 1) : null;
+    }
+    function combinations(group) {
+      const found = [];
+      for (const [parts, shorthand] of SHORTHANDS) {
+        const sets = /* @__PURE__ */ new Map();
+        for (const token of group) {
+          for (const part of parts) {
+            const value = valueOf(token.core, part);
+            if (value === null) continue;
+            const key = [token.variants.join(":"), Boolean(token.important), token.negative, token.opacity, value].join("|");
+            if (!sets.has(key)) sets.set(key, { value, tokens: /* @__PURE__ */ new Map() });
+            if (!sets.get(key).tokens.has(part)) sets.get(key).tokens.set(part, token);
+          }
+        }
+        for (const { value, tokens } of sets.values()) {
+          if (tokens.size !== parts.length) continue;
+          const ordered = [...tokens.values()].sort((a, b) => group.indexOf(a) - group.indexOf(b));
+          found.push({ tokens: ordered, raw: rebuild(ordered[0], value ? `${shorthand}-${value}` : shorthand) });
+        }
+      }
+      return found;
+    }
+    module2.exports = {
+      id: "enforces-shorthand",
+      siteDependent: true,
+      candidates({ staticGroups = [] }) {
+        return staticGroups.flatMap((group) => combinations(group).map(({ raw }) => raw));
+      },
+      // Static groups only: tokens of a binding or a PHP expression may be alternatives that never meet.
+      check({ staticGroups = [] }, site) {
+        const violations = [];
+        for (const group of staticGroups) {
+          const used = /* @__PURE__ */ new Set();
+          for (const { tokens, raw } of combinations(group)) {
+            if (tokens.some((token) => used.has(token)) || !site.generates(raw)) continue;
+            tokens.forEach((token) => used.add(token));
+            violations.push({ token: tokens[0], message: `${tokens.map((token) => `\`${token.raw}\``).join(" + ")}: use \`${raw}\`` });
+          }
+        }
+        return violations;
+      }
+    };
+  }
+});
+
+// src/rules/unknown-scale-value.js
+var require_unknown_scale_value = __commonJS({
+  "src/rules/unknown-scale-value.js"(exports2, module2) {
+    "use strict";
+    var { matchPrefix } = require_token();
+    var { SCALES, SCALE_PREFIXES } = require_utilities();
+    module2.exports = {
+      id: "unknown-scale-value",
+      siteDependent: true,
+      supersedes: ["no-unknown-class"],
+      check({ tokens }, site) {
+        const violations = [];
+        for (const token of tokens) {
+          if (token.arbitrary || site.generates(token.raw)) continue;
+          const match = matchPrefix(token.core, SCALE_PREFIXES);
+          if (!match) continue;
+          const { key, named } = SCALES[match.prefix];
+          if (!named.test(match.value) || match.value in site.scale(key)) continue;
+          violations.push({
+            token,
+            message: `\`${token.raw}\` is not in the theme \`${key}\` scale: Tailwind does not generate it, use an existing key or an arbitrary value`
+          });
+        }
+        return violations;
+      }
+    };
+  }
+});
+
+// src/rules/no-arbitrary-on-scale.js
+var require_no_arbitrary_on_scale = __commonJS({
+  "src/rules/no-arbitrary-on-scale.js"(exports2, module2) {
+    "use strict";
+    var { matchPrefix, rebuild } = require_token();
+    var { SCALES, SCALE_PREFIXES } = require_utilities();
+    var toPixels = (value) => {
+      const match = String(value).match(/^(-?\d*\.?\d+)(px|rem)$/);
+      if (!match) return null;
+      return match[2] === "rem" ? Number(match[1]) * 16 : Number(match[1]);
+    };
+    module2.exports = {
+      id: "no-arbitrary-on-scale",
+      siteDependent: true,
+      check({ tokens }, site) {
+        const violations = [];
+        for (const token of tokens) {
+          if (!token.arbitrary || token.property) continue;
+          const pixels = toPixels(token.arbitrary);
+          const match = matchPrefix(token.core, SCALE_PREFIXES);
+          if (pixels === null || !match) continue;
+          const entry = Object.entries(site.scale(SCALES[match.prefix].key)).filter(([name, value]) => name !== "DEFAULT" && !(Array.isArray(value) && value.length > 1)).find(([, value]) => toPixels(Array.isArray(value) ? value[0] : value) === pixels);
+          if (!entry) continue;
+          const fixed = rebuild(token, `${match.prefix}-${entry[0]}`);
+          violations.push({ token, message: `\`${token.raw}\` matches a scale key: use \`${fixed}\`` });
+        }
+        return violations;
+      }
+    };
+  }
+});
+
+// src/rules/redundant-with-component.js
+var require_redundant_with_component = __commonJS({
+  "src/rules/redundant-with-component.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      id: "redundant-with-component",
+      siteDependent: true,
+      // Static groups only: tokens of a binding or a PHP expression may be alternatives that never meet.
+      check({ staticGroups = [] }, site) {
+        const violations = [];
+        for (const group of staticGroups) {
+          const components = group.filter((token) => !token.variants.length && site.closure(token.raw));
+          for (const token of group) {
+            const owner = components.find((component) => component.raw !== token.raw && site.closure(component.raw).has(token.raw));
+            if (owner) violations.push({ token, message: `\`${token.raw}\` is already applied by \`${owner.raw}\`` });
+          }
+        }
+        return violations;
+      }
+    };
+  }
+});
+
+// src/rules/no-conflicting-classes.js
+var require_no_conflicting_classes = __commonJS({
+  "src/rules/no-conflicting-classes.js"(exports2, module2) {
+    "use strict";
+    var { bare } = require_token();
+    module2.exports = {
+      id: "no-conflicting-classes",
+      siteDependent: true,
+      check({ staticGroups = [] }, site) {
+        const violations = [];
+        for (const group of staticGroups) {
+          const seen = /* @__PURE__ */ new Map();
+          for (const token of group) {
+            const declarations = site.signature(bare(token));
+            if (!declarations?.length) continue;
+            const properties = [...new Set(declarations.map(([property]) => property))].sort();
+            const value = declarations.map(([property, val]) => `${property}:${val}`).sort().join(";");
+            const key = [token.variants.join(":"), token.important, properties.join(",")].join("|");
+            const previous = seen.get(key);
+            if (!previous) {
+              seen.set(key, { token, value });
+              continue;
+            }
+            if (previous.value === value) continue;
+            const shown = properties.filter((property) => !property.startsWith("--"));
+            const list = (shown.length ? shown : properties).map((property) => `\`${property}\``).join(", ");
+            violations.push({ token, message: `\`${token.raw}\` conflicts with \`${previous.token.raw}\`: both set ${list}` });
+          }
+        }
+        return violations;
+      }
+    };
+  }
+});
+
+// src/rules/no-duplicate-classes.js
+var require_no_duplicate_classes = __commonJS({
+  "src/rules/no-duplicate-classes.js"(exports2, module2) {
+    "use strict";
+    var { rebuild } = require_token();
+    module2.exports = {
+      id: "no-duplicate-classes",
+      siteDependent: false,
+      check({ staticGroups = [] }) {
+        const violations = [];
+        for (const group of staticGroups) {
+          const seen = /* @__PURE__ */ new Set();
+          for (const token of group) {
+            const key = rebuild({ ...token, importantSuffix: false }, token.core);
+            if (seen.has(key)) {
+              violations.push({ token, message: `\`${token.raw}\` is duplicated` });
+              continue;
+            }
+            seen.add(key);
+          }
+        }
+        return violations;
+      }
+    };
+  }
+});
+
+// src/rules/index.js
+var require_rules = __commonJS({
+  "src/rules/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = [
+      require_no_unknown_class(),
+      require_no_removed_v3_class(),
+      require_no_hardcoded_color(),
+      require_no_default_palette_shade(),
+      require_enforces_shorthand(),
+      require_unknown_scale_value(),
+      require_no_arbitrary_on_scale(),
+      require_redundant_with_component(),
+      require_no_conflicting_classes(),
+      require_no_duplicate_classes()
+    ];
+  }
+});
+
+// src/config.js
+var require_config = __commonJS({
+  "src/config.js"(exports2, module2) {
+    "use strict";
+    var fs = require("fs");
+    var path = require("path");
+    var micromatch = require_micromatch();
+    var RULES = require_rules();
+    var DEFAULT_IGNORE = ["**/node_modules/**"];
+    function globToRegExp(glob) {
+      return micromatch.makeRe(glob, { dot: true });
+    }
+    function normalizeConfig(raw, base) {
+      if (!Array.isArray(raw.sites)) throw new Error('tailwind-lint config: "sites" must be an array');
+      const sites = raw.sites.map((site, index) => {
+        if (!site.config || !site.css) throw new Error(`tailwind-lint config: site #${index + 1} needs "config" and "css"`);
+        return {
+          name: site.name ?? `site-${index + 1}`,
+          config: path.resolve(base, site.config),
+          css: path.resolve(base, site.css)
+        };
+      });
+      const rules = {};
+      for (const [id, options] of Object.entries(raw.rules ?? {})) {
+        const rule = RULES.find((candidate) => candidate.id === id);
+        if (!rule) throw new Error(`tailwind-lint config: unknown rule "${id}"`);
+        if (options !== false && (typeof options !== "object" || options === null || options.hint !== void 0 && typeof options.hint !== "string")) {
+          throw new Error(`tailwind-lint config: rule "${id}" takes false or { "hint": "\u2026" }`);
+        }
+        rules[id] = options && { ...options };
+        for (const [name, value] of Object.entries(options || {})) {
+          if (name === "hint") continue;
+          const option = rule.options?.[name];
+          if (!option) throw new Error(`tailwind-lint config: rule "${id}" has no option "${name}"`);
+          if (!option.valid(value)) throw new Error(`tailwind-lint config: invalid option "${name}" of rule "${id}"`);
+          if (option.resolve) rules[id][name] = option.resolve(value, base);
+        }
+      }
+      return {
+        sites,
+        include: (raw.include ?? ["**/*.html", "**/*.php", "**/*.phtml", "**/*.css"]).map(globToRegExp),
+        ignore: [...DEFAULT_IGNORE, ...raw.ignore ?? []].map(globToRegExp),
+        baselines: (raw.baselines ?? []).map((baseline) => ({ match: new RegExp(baseline.match), original: baseline.original })),
+        rules
+      };
+    }
+    function loadConfig2(file) {
+      const absolute = path.resolve(file);
+      if (!fs.existsSync(absolute)) throw new Error(`tailwind-lint: config file ${file} not found`);
+      return normalizeConfig(JSON.parse(fs.readFileSync(absolute, "utf8")), process.cwd());
+    }
+    module2.exports = { globToRegExp, normalizeConfig, loadConfig: loadConfig2 };
+  }
+});
+
+// src/lockfile.js
+var require_lockfile = __commonJS({
+  "src/lockfile.js"(exports2, module2) {
+    "use strict";
+    var fs = require("fs");
+    var path = require("path");
+    function packageRoot(req, name) {
+      let entry;
+      try {
+        entry = req.resolve(name);
+      } catch (error) {
+        if (error.code === "MODULE_NOT_FOUND") return null;
+        throw error;
+      }
+      let dir = path.dirname(entry);
+      for (; ; ) {
+        const file = path.join(dir, "package.json");
+        if (fs.existsSync(file)) {
+          try {
+            const json = JSON.parse(fs.readFileSync(file, "utf8"));
+            if (json.name === name) return { dir, version: json.version };
+          } catch {
+          }
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+      }
+    }
+    function projectDirOf(packageDir) {
+      const outer = packageDir.indexOf(`${path.sep}node_modules${path.sep}`);
+      return outer === -1 ? path.dirname(packageDir) : packageDir.slice(0, outer);
+    }
+    function readLock(lockFile) {
+      if (!fs.existsSync(lockFile)) return null;
+      try {
+        return JSON.parse(fs.readFileSync(lockFile, "utf8"));
+      } catch (error) {
+        throw new Error(`tailwind-lint: cannot parse ${lockFile}: ${error.message}`);
+      }
+    }
+    function assertLocked(req, names) {
+      const locks = /* @__PURE__ */ new Map();
+      for (const name of names) {
+        const pkg = packageRoot(req, name);
+        if (!pkg) throw new Error(`tailwind-lint: ${name} is not installed for ${path.dirname((req.resolve.paths(name) || ["."])[0])}`);
+        const projectDir = projectDirOf(pkg.dir);
+        if (!locks.has(projectDir)) {
+          const lockFile = path.join(projectDir, "package-lock.json");
+          locks.set(projectDir, readLock(lockFile));
+        }
+        const lock = locks.get(projectDir);
+        if (!lock) throw new Error(`tailwind-lint: no package-lock.json in ${projectDir}, required to pin ${name}`);
+        const key = path.relative(projectDir, pkg.dir).split(path.sep).join("/");
+        const locked = lock.packages?.[key]?.version;
+        if (locked !== pkg.version) {
+          throw new Error(`tailwind-lint: ${name} ${pkg.version} is installed in ${projectDir} but its package-lock.json pins ${locked ?? "nothing"}`);
+        }
+      }
+    }
+    module2.exports = { assertLocked };
+  }
+});
+
+// src/adapters/tailwind-v3.js
+var require_tailwind_v3 = __commonJS({
+  "src/adapters/tailwind-v3.js"(exports2, module2) {
+    "use strict";
+    var fs = require("fs");
+    var path = require("path");
+    var { assertLocked } = require_lockfile();
+    var COLOR_THEME_KEYS = [
+      "colors",
+      "textColor",
+      "backgroundColor",
+      "borderColor",
+      "ringColor",
+      "ringOffsetColor",
+      "outlineColor",
+      "fill",
+      "stroke",
+      "divideColor",
+      "placeholderColor",
+      "accentColor",
+      "caretColor",
+      "textDecorationColor",
+      "boxShadowColor",
+      "gradientColorStops"
+    ];
+    function flattenKeys(object, prefix, out) {
+      if (!object || typeof object !== "object") return out;
+      for (const [key, value] of Object.entries(object)) {
+        const name = key === "DEFAULT" ? prefix : [prefix, key].filter(Boolean).join("-");
+        if (value && typeof value === "object" && !Array.isArray(value)) flattenKeys(value, name, out);
+        else out.add(name);
+      }
+      return out;
+    }
+    function collectImports(file, seen = /* @__PURE__ */ new Set()) {
+      if (seen.has(file) || !fs.existsSync(file)) return seen;
+      seen.add(file);
+      const css = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const match of css.matchAll(/@import\s+(?:url\()?\s*["']?([^"')\s;]+)["']?\s*\)?/g)) {
+        const specifier = match[1];
+        const target = path.resolve(path.dirname(file), specifier);
+        if (/^(?:[a-z]+:)?\/\//i.test(specifier) || target.includes(`${path.sep}node_modules${path.sep}`)) continue;
+        if (target.endsWith(".css") && fs.statSync(target, { throwIfNoEntry: false })?.isFile()) collectImports(target, seen);
+        else if (/^\.{0,2}\//.test(specifier) || specifier.endsWith(".css") || /[*?{]/.test(specifier) || fs.existsSync(target)) {
+          throw new Error(`tailwind-lint: ${file} imports ${specifier}, which tailwind-lint cannot resolve`);
+        }
+      }
+      return seen;
+    }
+    function buildComponentIndex(entry, postcss, nesting) {
+      const direct = /* @__PURE__ */ new Map();
+      for (const file of collectImports(entry)) {
+        const root = parse(postcss, [nesting], file);
+        root.walkAtRules("apply", (rule) => {
+          if (rule.parent?.type !== "rule") return;
+          for (let node = rule.parent.parent; node; node = node.parent) {
+            if (node.type === "atrule" && node.name !== "layer") return;
+          }
+          const tokens = rule.params.replace(/!important/g, "").split(/\s+/).filter(Boolean);
+          for (const selector of rule.parent.selectors) {
+            const match = selector.trim().match(/^\.([\w-]+)$/);
+            if (!match) continue;
+            if (!direct.has(match[1])) direct.set(match[1], /* @__PURE__ */ new Set());
+            tokens.forEach((token) => direct.get(match[1]).add(token));
+          }
+        });
+      }
+      const closed = /* @__PURE__ */ new Map();
+      const close = (name, stack) => {
+        if (closed.has(name)) return closed.get(name);
+        const out = /* @__PURE__ */ new Set();
+        stack.add(name);
+        for (const token of direct.get(name) ?? []) {
+          out.add(token);
+          if (!direct.has(token) || stack.has(token)) continue;
+          close(token, stack).forEach((applied) => {
+            if (direct.has(applied)) out.add(applied);
+          });
+        }
+        stack.delete(name);
+        closed.set(name, out);
+        return out;
+      };
+      for (const name of direct.keys()) close(name, /* @__PURE__ */ new Set());
+      return closed;
+    }
+    function parse(postcss, plugins, file) {
+      try {
+        return postcss(plugins).process(fs.readFileSync(file, "utf8"), { from: file }).root;
+      } catch (error) {
+        throw new Error(`tailwind-lint: cannot parse ${file}: ${error.reason ?? error.message}`);
+      }
+    }
+    function declaredClasses(files, postcss, nesting) {
+      const names = /* @__PURE__ */ new Set();
+      for (const file of files) {
+        parse(postcss, [nesting], file).walkRules((rule) => {
+          for (const match of rule.selector.matchAll(/\.((?:\\.|[\w-])+)/g)) names.add(match[1].replace(/\\(.)/g, "$1"));
+        });
+      }
+      return names;
+    }
+    function layerRoot(files, postcss, nesting) {
+      const root = postcss.root();
+      for (const file of files) {
+        parse(postcss, [nesting], file).walkAtRules(/^(layer|responsive|variants)$/, (rule) => {
+          if (rule.name === "layer" ? !["components", "utilities"].includes(rule.params) : rule.parent.type !== "root") return;
+          root.append(postcss.atRule({ name: "layer", params: rule.name === "layer" ? rule.params : "utilities", nodes: rule.nodes.map((node) => node.clone()) }));
+        });
+      }
+      return root;
+    }
+    function muteTailwindLog(req) {
+      const log = req("tailwindcss/lib/util/log").default;
+      Object.keys(log).forEach((key) => {
+        log[key] = () => {
+        };
+      });
+    }
+    function markers(resolved) {
+      const found = /* @__PURE__ */ new Set(["group", "peer"]);
+      const [mode] = [].concat(resolved.darkMode ?? []);
+      if (mode === "class" || mode === "selector") found.add("dark");
+      return found;
+    }
+    function isHyvaTheme(configDir, configText) {
+      return fs.existsSync(path.join(configDir, "hyva.config.json")) || configText.includes("@hyva-themes/hyva-modules");
+    }
+    function loadHyvaTheme(req, configFile) {
+      const themeDir = path.dirname(configFile);
+      const postcssConfig = path.join(themeDir, "postcss.config.js");
+      const hyvaDir = path.dirname(req.resolve("@hyva-themes/hyva-modules/package.json"));
+      for (const key of Object.keys(req.cache)) {
+        if (key.startsWith(hyvaDir + path.sep) || key === configFile || key === postcssConfig) delete req.cache[key];
+      }
+      const cwd = process.cwd();
+      const { info } = console;
+      try {
+        process.chdir(themeDir);
+        console.info = () => {
+        };
+        const hyva = req("@hyva-themes/hyva-modules");
+        console.info = info;
+        if (!hyva.hyvaThemesConfig) {
+          throw new Error(`tailwind-lint: no app/etc/hyva-themes.json above ${themeDir}: run bin/magento hyva:config:generate`);
+        }
+        const plugins = fs.existsSync(postcssConfig) ? [].concat(req(postcssConfig).plugins ?? []) : [];
+        const importModules = plugins.find((plugin) => plugin === hyva.postcssImportHyvaModules || plugin?.postcssPlugin === "hyva-postcss-in-modules");
+        return { config: req(configFile), importModules };
+      } finally {
+        console.info = info;
+        process.chdir(cwd);
+      }
+    }
+    function moduleImports(importModules, css, postcss) {
+      if (!importModules) return [];
+      return postcss([importModules]).process("", { from: css }).root.nodes.filter((node) => node.type === "atrule" && node.name === "import").map((node) => node.params.replace(/^["']|["']$/g, ""));
+    }
+    function loadSite({ name, config: configFile, css }, req) {
+      const configDir = path.dirname(configFile);
+      const hyvaTheme = isHyvaTheme(configDir, fs.readFileSync(configFile, "utf8"));
+      assertLocked(req, ["tailwindcss", "postcss", "micromatch", ...hyvaTheme ? ["@hyva-themes/hyva-modules"] : []]);
+      const { config, importModules } = hyvaTheme ? loadHyvaTheme(req, configFile) : { config: req(configFile) };
+      muteTailwindLog(req);
+      const resolved = req("tailwindcss/resolveConfig")(config);
+      const defaultColors = req("tailwindcss/colors");
+      const micromatch = req("micromatch");
+      const postcss = req("postcss");
+      const cssDir = path.dirname(css);
+      const themeColorNames = /* @__PURE__ */ new Set();
+      COLOR_THEME_KEYS.forEach((key) => flattenKeys(config.theme?.extend?.[key], "", themeColorNames));
+      const globs = { include: [], ignore: [] };
+      for (const entry of resolved.content.files.filter((file) => typeof file === "string")) {
+        const glob = entry.replace(/^!/, "");
+        globs[entry.startsWith("!") ? "ignore" : "include"].push(path.isAbsolute(glob) ? glob : path.resolve(configDir, glob));
+      }
+      const nesting = req("tailwindcss/nesting");
+      const components = buildComponentIndex(css, postcss, nesting);
+      const signatures = /* @__PURE__ */ new Map();
+      const generated = /* @__PURE__ */ new Map();
+      let declared = null;
+      let context = null;
+      const generate = (candidate) => {
+        context ??= req("tailwindcss/lib/lib/setupContextUtils").createContext(resolved, [], layerRoot(cssFiles(), postcss, nesting));
+        return req("tailwindcss/lib/lib/generateRules").generateRules(/* @__PURE__ */ new Set([candidate]), context);
+      };
+      const modulesCss = moduleImports(importModules, css, postcss);
+      const cssFiles = () => {
+        const files = collectImports(css);
+        modulesCss.forEach((file) => collectImports(file, files));
+        return [...files].sort();
+      };
+      return {
+        name,
+        version: 3,
+        markers: markers(resolved),
+        postcss,
+        covers(absFile) {
+          if (absFile.endsWith(".css")) return absFile.startsWith(cssDir + path.sep);
+          return micromatch.isMatch(absFile, globs.include, { ignore: globs.ignore });
+        },
+        isDefaultShade(color) {
+          const match = color.match(/^([a-z]+)-(\d+)$/);
+          if (!match || themeColorNames.has(color)) return false;
+          const fallback = defaultColors[match[1]]?.[match[2]];
+          return fallback !== void 0 && resolved.theme.colors[match[1]]?.[match[2]] === fallback;
+        },
+        scale(key) {
+          return resolved.theme[key] ?? {};
+        },
+        closure(className) {
+          return components.get(className) ?? null;
+        },
+        async loadSignatures(classNames) {
+          for (const className of classNames) {
+            if (signatures.has(className)) continue;
+            const rules = generate(className).filter(([meta, rule]) => meta.layer === "utilities" && rule.type === "rule");
+            const declarations = rules.flatMap(([, rule]) => rule.nodes.filter((node) => node.type === "decl").map((node) => [node.prop, node.value]));
+            signatures.set(className, rules.length ? declarations : null);
+          }
+        },
+        signature(className) {
+          return signatures.get(className) ?? null;
+        },
+        async loadClasses(raws) {
+          declared ??= declaredClasses(cssFiles(), postcss, nesting);
+          for (const raw of raws) {
+            if (!generated.has(raw)) generated.set(raw, generate(raw).length > 0);
+          }
+        },
+        generates(raw) {
+          if (!generated.has(raw)) throw new Error(`tailwind-lint: generates(${raw}) called before loadClasses`);
+          return generated.get(raw);
+        },
+        declares(className) {
+          if (!declared) throw new Error("tailwind-lint: declares() called before loadClasses");
+          return declared.has(className);
+        }
+      };
+    }
+    module2.exports = { loadSite };
+  }
+});
+
 // src/adapters/tailwind-v4.js
 var require_tailwind_v4 = __commonJS({
   "src/adapters/tailwind-v4.js"(exports2, module2) {
@@ -10272,7 +10175,6 @@ var require_tailwind_v4 = __commonJS({
     var fs = require("fs");
     var path = require("path");
     var { assertLocked } = require_lockfile();
-    var { readHyvaConfig, isHyvaTheme, hyvaModules, hyvaSourceCss, hyvaTokensCss, assertMagentoRoot } = require_hyva();
     var postcss = require_postcss();
     var micromatch = require_micromatch();
     var SPACING_KEYS = /* @__PURE__ */ new Set([
@@ -10308,7 +10210,6 @@ var require_tailwind_v4 = __commonJS({
       borderRadius: { none: "0", full: "calc(infinity * 1px)" }
     };
     var IMPORT = /\/\*[\s\S]*?\*\/|@import\s+(?:url\()?\s*["']([^"']+)["'][^;]*;?/g;
-    var TOKENS_SLOT = "/* tailwind-lint: hyva-tokens.css */";
     function parse(file, css) {
       try {
         return postcss.parse(css, { from: file });
@@ -10316,44 +10217,31 @@ var require_tailwind_v4 = __commonJS({
         throw new Error(`tailwind-lint: cannot parse ${file}: ${error.reason ?? error.message}`);
       }
     }
-    function resolveImport(from, target, generatedDir) {
+    function resolveImport(from, target) {
       if (!target.startsWith(".") && !path.isAbsolute(target)) return null;
       const resolved = path.resolve(path.dirname(from), target);
       if (resolved.endsWith(".css")) return resolved;
-      if (resolved.startsWith(generatedDir + path.sep)) return `${resolved}.css`;
-      return [`${resolved}.css`, path.join(resolved, "index.css")].find(fs.existsSync) ?? resolved;
+      return [`${resolved}.css`, path.join(resolved, "index.css")].find(fs.existsSync) ?? `${resolved}.css`;
     }
-    function unrebuildable(file, target) {
-      return new Error(`tailwind-lint: ${file} imports ${target}, a generated file tailwind-lint cannot rebuild`);
-    }
-    function rewriteEntry(entry, generatedDir, hyva) {
-      const isGenerated = (target) => target.startsWith(generatedDir + path.sep);
-      return fs.readFileSync(entry, "utf8").replace(IMPORT, (whole, target) => {
-        if (target === void 0) return whole;
-        const resolved = resolveImport(entry, target, generatedDir);
-        if (!resolved || !isGenerated(resolved)) return whole;
-        const name = path.relative(generatedDir, resolved);
-        if (hyva && name === "hyva-source.css") return hyva.sourceCss;
-        if (hyva && name === "hyva-tokens.css") return TOKENS_SLOT;
-        throw unrebuildable(entry, resolved);
-      });
-    }
-    function collectFiles(entry, css, generatedDir) {
+    function collectFiles(entry) {
       const files = [];
       const seen = /* @__PURE__ */ new Set();
-      const visit = (file, text) => {
+      const visit = (file) => {
         if (seen.has(file)) return;
         seen.add(file);
+        const text = fs.readFileSync(file, "utf8");
         files.push({ file, css: text, root: parse(file, text) });
         for (const match of text.matchAll(IMPORT)) {
           if (match[1] === void 0) continue;
-          const target = resolveImport(file, match[1], generatedDir);
+          const target = resolveImport(file, match[1]);
           if (!target) continue;
-          if (target.startsWith(generatedDir + path.sep)) throw unrebuildable(file, target);
-          if (fs.existsSync(target)) visit(target, fs.readFileSync(target, "utf8"));
+          if (!fs.existsSync(target)) {
+            throw new Error(`tailwind-lint: ${file} imports ${target}, which does not exist: if a build step generates it, build the site first`);
+          }
+          visit(target);
         }
       };
-      visit(entry, css);
+      visit(entry);
       return files;
     }
     function themeVariables(files) {
@@ -10419,25 +10307,15 @@ var require_tailwind_v4 = __commonJS({
       }
       return { names, applied };
     }
-    function hyvaContext(root, cssDir, name, configFile) {
-      if (!root) throw new Error(`tailwind-lint: site ${name} is a Hyv\xE4 theme, the Magento root is required`);
-      assertMagentoRoot(configFile, root);
-      const config = readHyvaConfig(cssDir);
-      const area = config?.tailwind?.area ?? "frontend";
-      return { config, sourceCss: hyvaSourceCss(root, hyvaModules(root, config), area) };
-    }
-    function loadSite({ name, config: configFile, css }, req, root) {
-      const hyvaTheme = isHyvaTheme(path.dirname(configFile), fs.existsSync(css) ? fs.readFileSync(css, "utf8") : "");
-      assertLocked(req, ["tailwindcss", "@tailwindcss/node", ...hyvaTheme ? ["@hyva-themes/hyva-modules"] : []]);
+    function loadSite({ name, css }, req) {
+      assertLocked(req, ["tailwindcss", "@tailwindcss/node"]);
       const cssDir = path.dirname(css);
-      const generatedDir = path.join(cssDir, "generated");
-      const hyva = hyvaTheme ? hyvaContext(root, cssDir, name, configFile) : null;
-      const entryCss = rewriteEntry(css, generatedDir, hyva);
-      const files = collectFiles(css, entryCss, generatedDir);
+      const files = collectFiles(css);
+      const entryCss = files[0].css;
       const themeFile = req.resolve("tailwindcss/theme.css");
       const defaults = themeVariables([{ root: parse(themeFile, fs.readFileSync(themeFile, "utf8")) }]);
-      let project = themeVariables(files);
-      let variables = new Map([...defaults, ...project]);
+      const project = themeVariables(files);
+      const variables = new Map([...defaults, ...project]);
       const globs = sourceGlobs(files);
       const components = buildComponentIndex(files);
       const signatures = /* @__PURE__ */ new Map();
@@ -10449,17 +10327,11 @@ var require_tailwind_v4 = __commonJS({
       const scales = /* @__PURE__ */ new Map();
       const prepare = () => {
         ready ??= (async () => {
-          const tokens = entryCss.includes(TOKENS_SLOT) ? await hyvaTokensCss(cssDir, hyva.config, req) ?? "" : "";
-          const finalCss = entryCss.replace(TOKENS_SLOT, () => tokens);
-          files[0] = { file: css, css: finalCss, root: parse(css, finalCss) };
-          project = themeVariables(files);
-          variables = new Map([...defaults, ...project]);
-          scales.clear();
           const tailwind = req("@tailwindcss/node");
           [compiler, designSystem] = await Promise.all([
-            tailwind.compile(finalCss, { base: cssDir, from: css, onDependency: () => {
+            tailwind.compile(entryCss, { base: cssDir, from: css, onDependency: () => {
             } }),
-            tailwind.__unstable__loadDesignSystem(finalCss, { base: cssDir })
+            tailwind.__unstable__loadDesignSystem(entryCss, { base: cssDir })
           ]);
           declared = new Set(components.names);
           parse(`${css} (compiled)`, compiler.build([])).walkRules((rule) => {
@@ -10590,7 +10462,7 @@ var require_sites = __commonJS({
     function loadSites2(config) {
       return config.sites.map((site) => {
         const req = createRequire(site.config);
-        return adapterFor(req("tailwindcss/package.json").version).loadSite(site, req, config.root);
+        return adapterFor(req("tailwindcss/package.json").version).loadSite(site, req);
       });
     }
     module2.exports = { adapterFor, loadSites: loadSites2 };
@@ -11003,19 +10875,20 @@ var require_lint = __commonJS({
     var RULES = require_rules();
     var PHP_EXTENSIONS = /* @__PURE__ */ new Set([".php", ".phtml"]);
     function activeRules(options = {}) {
-      return RULES.filter((rule) => options[rule.id] !== false).map((rule) => ({ rule, hint: options[rule.id]?.hint }));
+      return RULES.filter((rule) => options[rule.id] !== false).map((rule) => ({ rule, options: options[rule.id] || {} }));
     }
     function lintEntries(entry, reportable, sites, rules) {
       const position = ({ token }) => `${token.line}|${token.index}`;
       const found = /* @__PURE__ */ new Map();
-      for (const { rule, hint } of rules) {
+      for (const { rule, options = {} } of rules) {
+        const { hint } = options;
         let violations2;
         if (!rule.siteDependent) {
-          violations2 = rule.check(entry);
+          violations2 = rule.check(entry, void 0, options);
         } else if (!sites.length) {
           continue;
         } else {
-          const perSite = sites.map((site) => rule.check(entry, site));
+          const perSite = sites.map((site) => rule.check(entry, site, options));
           violations2 = perSite[0].filter((violation) => perSite.every((list) => list.some((other) => position(other) === position(violation))));
         }
         const seen = /* @__PURE__ */ new Map();

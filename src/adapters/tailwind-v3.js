@@ -3,7 +3,6 @@
 const fs = require('fs');
 const path = require('path');
 const { assertLocked } = require('../lockfile');
-const { readHyvaConfig, isHyvaTheme, hyvaModules, hyvaModuleCssFiles, assertMagentoRoot, realpath } = require('../hyva');
 
 const COLOR_THEME_KEYS = [
     'colors', 'textColor', 'backgroundColor', 'borderColor', 'ringColor', 'ringOffsetColor', 'outlineColor',
@@ -118,46 +117,51 @@ function markers(resolved) {
     return found;
 }
 
-// hyva-modules reads app/etc/hyva-themes.json, found from process.cwd(), as soon as it is required.
-function withHyvaEnvironment(req, configFile, root, modules, area, load) {
+// Resolving @hyva-themes/hyva-modules is not enough: a plain theme may have it installed.
+function isHyvaTheme(configDir, configText) {
+    return fs.existsSync(path.join(configDir, 'hyva.config.json')) || configText.includes('@hyva-themes/hyva-modules');
+}
+
+// hyva-modules reads app/etc/hyva-themes.json, from the Magento root above process.cwd(), as soon as it is required.
+function loadHyvaTheme(req, configFile) {
     const themeDir = path.dirname(configFile);
-    const basePath = assertMagentoRoot(configFile, root);
+    const postcssConfig = path.join(themeDir, 'postcss.config.js');
     const hyvaDir = path.dirname(req.resolve('@hyva-themes/hyva-modules/package.json'));
-    const stale = new Set(modules.map(({ src }) => path.join(basePath, src, 'view', area, 'tailwind/tailwind.config.js')));
     for (const key of Object.keys(req.cache)) {
-        if (key.startsWith(hyvaDir + path.sep) || key.startsWith(realpath(hyvaDir) + path.sep) || stale.has(key)) delete req.cache[key];
+        if (key.startsWith(hyvaDir + path.sep) || key === configFile || key === postcssConfig) delete req.cache[key];
     }
-    const themesJson = path.join(basePath, 'app/etc/hyva-themes.json');
-    const content = JSON.stringify({ extensions: modules.filter((m) => !m.cssExcluded).map(({ src }) => ({ src })) });
     const cwd = process.cwd();
-    const { readFileSync } = fs;
-    fs.readFileSync = function (file, ...rest) {
-        if (typeof file === 'string' && path.resolve(file) === themesJson) return content;
-        return readFileSync.call(this, file, ...rest);
-    };
+    const { info } = console;
     try {
         process.chdir(themeDir);
-        return load();
+        // hyva-modules warns on stdout when the file is missing, which would mix with the violations.
+        console.info = () => {};
+        const hyva = req('@hyva-themes/hyva-modules');
+        console.info = info;
+        if (!hyva.hyvaThemesConfig) {
+            throw new Error(`tailwind-lint: no app/etc/hyva-themes.json above ${themeDir}: run bin/magento hyva:config:generate`);
+        }
+        const plugins = fs.existsSync(postcssConfig) ? [].concat(req(postcssConfig).plugins ?? []) : [];
+        const importModules = plugins.find((plugin) => plugin === hyva.postcssImportHyvaModules || plugin?.postcssPlugin === 'hyva-postcss-in-modules');
+        return { config: req(configFile), importModules };
     } finally {
-        fs.readFileSync = readFileSync;
+        console.info = info;
         process.chdir(cwd);
     }
 }
 
-function loadSite({ name, config: configFile, css }, req, root) {
+function moduleImports(importModules, css, postcss) {
+    if (!importModules) return [];
+    return postcss([importModules]).process('', { from: css }).root.nodes
+        .filter((node) => node.type === 'atrule' && node.name === 'import')
+        .map((node) => node.params.replace(/^["']|["']$/g, ''));
+}
+
+function loadSite({ name, config: configFile, css }, req) {
     const configDir = path.dirname(configFile);
     const hyvaTheme = isHyvaTheme(configDir, fs.readFileSync(configFile, 'utf8'));
     assertLocked(req, ['tailwindcss', 'postcss', 'micromatch', ...(hyvaTheme ? ['@hyva-themes/hyva-modules'] : [])]);
-    if (hyvaTheme && !root) throw new Error(`tailwind-lint: site ${name} is a Hyvä theme, the Magento root is required`);
-    const hyvaConfig = hyvaTheme ? readHyvaConfig(configDir) : null;
-    const area = hyvaConfig?.tailwind?.area ?? 'frontend';
-    const modules = hyvaTheme ? hyvaModules(root, hyvaConfig) : [];
-    const config = hyvaTheme
-        ? withHyvaEnvironment(req, configFile, root, modules, area, () => {
-            delete req.cache[configFile];
-            return req(configFile);
-        })
-        : req(configFile);
+    const { config, importModules } = hyvaTheme ? loadHyvaTheme(req, configFile) : { config: req(configFile) };
     muteTailwindLog(req);
     const resolved = req('tailwindcss/resolveConfig')(config);
     const defaultColors = req('tailwindcss/colors');
@@ -182,10 +186,12 @@ function loadSite({ name, config: configFile, css }, req, root) {
         context ??= req('tailwindcss/lib/lib/setupContextUtils').createContext(resolved, [], layerRoot(cssFiles(), postcss, nesting));
         return req('tailwindcss/lib/lib/generateRules').generateRules(new Set([candidate]), context);
     };
-    const cssFiles = () => [
-        ...collectImports(css),
-        ...(hyvaTheme ? hyvaModuleCssFiles(root, modules, area) : []),
-    ].sort();
+    const modulesCss = moduleImports(importModules, css, postcss);
+    const cssFiles = () => {
+        const files = collectImports(css);
+        modulesCss.forEach((file) => collectImports(file, files));
+        return [...files].sort();
+    };
 
     return {
         name,

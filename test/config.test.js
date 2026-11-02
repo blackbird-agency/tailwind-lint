@@ -16,7 +16,6 @@ test('globToRegExp', () => {
 
 test('normalizeConfig resolves paths against the base and fills defaults', () => {
     const config = normalizeConfig({ sites: [{ config: 'a/tailwind.config.js', css: 'a/styles.css' }] }, '/project');
-    assert.equal(config.root, '/project');
     assert.deepEqual(config.sites, [{ name: 'site-1', config: path.resolve('/project/a/tailwind.config.js'), css: path.resolve('/project/a/styles.css') }]);
     assert.ok(config.include.some((pattern) => pattern.test('x/y.phtml')));
     assert.ok(config.ignore.some((pattern) => pattern.test('x/node_modules/y.css')));
@@ -35,6 +34,15 @@ test('normalizeConfig rejects unknown rules and malformed rule options', () => {
     assert.throws(() => normalizeConfig({ sites, rules: { 'enforces-shorthand': true } }, '/project'), /rule "enforces-shorthand" takes false/);
     assert.deepEqual(normalizeConfig({ sites, rules: { 'enforces-shorthand': false, 'no-hardcoded-color': { hint: 'x' } } }, '/project').rules,
         { 'enforces-shorthand': false, 'no-hardcoded-color': { hint: 'x' } });
+});
+
+test('normalizeConfig checks rule-specific options and resolves cssFiles against the base', () => {
+    const sites = [{ config: 'a.js', css: 'a.css' }];
+    assert.throws(() => normalizeConfig({ sites, rules: { 'no-hardcoded-color': { cssFiles: ['a.css'] } } }, '/project'), /rule "no-hardcoded-color" has no option "cssFiles"/);
+    assert.throws(() => normalizeConfig({ sites, rules: { 'no-unknown-class': { cssFile: ['a.css'] } } }, '/project'), /rule "no-unknown-class" has no option "cssFile"/);
+    assert.throws(() => normalizeConfig({ sites, rules: { 'no-unknown-class': { cssFiles: 'a.css' } } }, '/project'), /invalid option "cssFiles" of rule "no-unknown-class"/);
+    assert.deepEqual(normalizeConfig({ sites, rules: { 'no-unknown-class': { cssFiles: ['vendor/x/web/css/*.css'], hint: 'h' } } }, '/project').rules,
+        { 'no-unknown-class': { cssFiles: [path.resolve('/project/vendor/x/web/css/*.css')], hint: 'h' } });
 });
 
 test('globToRegExp supports braces', () => {

@@ -1,4 +1,5 @@
 {
     "tailwind": { "exclude": [{ "src": "vendor/acme/excluded" }, { "src": "vendor/acme/kept", "keepSource": true }] },
-    "tokens": { "values": { "color": { "brand": { "500": "#123456" } } } }
+    "tokens": { "values": { "color": { "brand": { "500": "#123456" } } } },
+    "fonts": [{ "name": "Acme", "provider": "local", "cssVariable": "--font-brand", "fallbacks": ["sans-serif"], "variants": [{ "weight": "400", "src": "acme-regular.woff2" }] }]
 }

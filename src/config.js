@@ -21,20 +21,28 @@ function normalizeConfig(raw, base) {
             css: path.resolve(base, site.css),
         };
     });
-    const ids = new Set(RULES.map((rule) => rule.id));
+    const rules = {};
     for (const [id, options] of Object.entries(raw.rules ?? {})) {
-        if (!ids.has(id)) throw new Error(`tailwind-lint config: unknown rule "${id}"`);
+        const rule = RULES.find((candidate) => candidate.id === id);
+        if (!rule) throw new Error(`tailwind-lint config: unknown rule "${id}"`);
         if (options !== false && (typeof options !== 'object' || options === null || (options.hint !== undefined && typeof options.hint !== 'string'))) {
             throw new Error(`tailwind-lint config: rule "${id}" takes false or { "hint": "…" }`);
         }
+        rules[id] = options && { ...options };
+        for (const [name, value] of Object.entries(options || {})) {
+            if (name === 'hint') continue;
+            const option = rule.options?.[name];
+            if (!option) throw new Error(`tailwind-lint config: rule "${id}" has no option "${name}"`);
+            if (!option.valid(value)) throw new Error(`tailwind-lint config: invalid option "${name}" of rule "${id}"`);
+            if (option.resolve) rules[id][name] = option.resolve(value, base);
+        }
     }
     return {
-        root: base,
         sites,
         include: (raw.include ?? ['**/*.html', '**/*.php', '**/*.phtml', '**/*.css']).map(globToRegExp),
         ignore: [...DEFAULT_IGNORE, ...(raw.ignore ?? [])].map(globToRegExp),
         baselines: (raw.baselines ?? []).map((baseline) => ({ match: new RegExp(baseline.match), original: baseline.original })),
-        rules: raw.rules ?? {},
+        rules,
     };
 }
 
