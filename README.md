@@ -78,48 +78,34 @@ only the lines added since `HEAD`.
 | `2` | violations on stdout, one per line: `file:line [rule] message` |
 | `1` | the linter could not run: message on stderr |
 
-The two scripts below read the config path from `$TAILWIND_LINT_CONFIG`, by default
-`dev/quality/tailwind-lint.config.json`.
+tailwind-lint runs wherever `node` is and knows nothing of the environment around it: a project
+whose tools live in a container commits from that container, as it already does for phpcs or
+phpmd.
 
 ### GrumPHP
 
-`bin/lint-staged.sh` lints the files it is given, or else the staged `*.phtml` / `*.css`
-files. It calls `node` directly: under Warden, GrumPHP runs in the PHP container.
+The `tailwind_lint` task lints the files GrumPHP hands it: on a commit, the files of that
+commit, whether it is made with `git commit`, `git commit -a` or `git commit <path>`; on
+`grumphp run`, every file of the project.
 
 ```yaml
 grumphp:
+    extensions:
+        - Blackbird\TailwindLint\GrumPHP\Extension
     tasks:
         tailwind_lint:
-            scripts:
-                - vendor/blackbird/tailwind-lint/bin/lint-staged.sh
-            triggered_by: [phtml, css]
-            metadata:
-                task: shell
+            whitelist_patterns:
+                - /^app\/design\/frontend\/[^\/]+\/hyva\//
 ```
 
-### Claude Code
+| Option | Default | Purpose |
+|---|---|---|
+| `config` | `dev/quality/tailwind-lint.config.json` | config path, relative to the project root |
+| `triggered_by` | `[phtml, css]` | extensions of the files to lint |
+| `whitelist_patterns` | `[]` | regexes a file path must match, as in the other GrumPHP tasks |
+| `ignore_patterns` | `[]` | regexes that exclude a file path |
 
-`hooks/claude-post-tool-use.sh` lints each `*.phtml` / `*.css` file Claude edits and sends the
-violations back to it. It runs on the host, reaches `node` through
-`warden env exec -T php-fpm`, needs `jq`, and does nothing when the config file is absent. In
-the project's `.claude/settings.json`:
-
-```json
-"hooks": {
-    "PostToolUse": [
-        {
-            "matcher": "Edit|Write|MultiEdit",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "\"$CLAUDE_PROJECT_DIR\"/vendor/blackbird/tailwind-lint/hooks/claude-post-tool-use.sh",
-                    "timeout": 30
-                }
-            ]
-        }
-    ]
-}
-```
+GrumPHP runs the task where it runs itself, so `node` must be available there.
 
 ## Configuration
 
@@ -175,6 +161,8 @@ globs precise: the folder before the first wildcard is walked.
   literals compared with `==` / `!=` or used as keys (`'pending' =>`).
 - PHP variables are read only when their name contains `class`, and not when built with `.=`.
 - A class declared only by an empty CSS rule is unknown: Tailwind drops empty rules.
+- Like every GrumPHP task, `tailwind_lint` lints the files as they are on disk: the unstaged
+  changes of a committed file are linted too.
 
 ## Development
 

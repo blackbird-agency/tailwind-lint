@@ -151,7 +151,7 @@ test('v3: theme components from @layer components are generated with variants', 
     assert.equal(site.generates('md:not-a-component'), false);
 });
 
-test('v3: Tailwind warnings are muted, they would reach Claude through the hook stderr', async () => {
+test('v3: Tailwind warnings are muted, stderr only carries the reason the linter could not run', async () => {
     const warnings = [];
     const { warn } = console;
     console.warn = (...args) => warnings.push(args.join(' '));

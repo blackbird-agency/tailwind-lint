@@ -1,0 +1,8 @@
+services:
+    tailwind_lint.task:
+        class: Blackbird\TailwindLint\GrumPHP\TailwindLint
+        arguments:
+            - '@process_builder'
+            - '@formatter.raw_process'
+        tags:
+            - { name: grumphp.task, task: tailwind_lint }

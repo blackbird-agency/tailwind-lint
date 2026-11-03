@@ -1,6 +1,5 @@
 {
   "name": "@blackbird/tailwind-lint",
-  "version": "0.1.0",
   "private": true,
   "description": "Lint the Tailwind CSS classes of templates and stylesheets against each site's own Tailwind config. Distributed as the Composer package blackbird/tailwind-lint, with a prebuilt dependency-free bundle in dist/.",
   "license": "UNLICENSED",
@@ -9,8 +8,7 @@
   },
   "files": [
     "dist",
-    "bin",
-    "hooks"
+    "bin"
   ],
   "engines": {
     "node": ">=18"

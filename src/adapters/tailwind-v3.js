@@ -104,7 +104,7 @@ function layerRoot(files, postcss, nesting) {
     return root;
 }
 
-// Tailwind warns on stderr, which the Claude hook forwards to Claude as if it were a violation.
+// Tailwind warns on stderr, which tailwind-lint keeps for the reason it could not run.
 function muteTailwindLog(req) {
     const log = req('tailwindcss/lib/util/log').default;
     Object.keys(log).forEach((key) => { log[key] = () => {}; });
